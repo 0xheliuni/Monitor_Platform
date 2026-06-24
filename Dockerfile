@@ -19,6 +19,14 @@ COPY package.json pnpm-lock.yaml ./
 # 安装生产依赖（pnpm.onlyBuiltDependencies 控制 better-sqlite3 原生编译）
 RUN pnpm install --frozen-lockfile
 
+# pnpm 用符号链接把包指向 .pnpm 虚拟仓库，直接 COPY better-sqlite3 只会拷到
+# 悬空链接（运行时缺少 .node 二进制导致启动崩溃）。用 cp -RL 解引用，物化成
+# 真实目录，供 runner 阶段拷贝。
+RUN mkdir -p /native-deps && \
+    cp -RL /app/node_modules/better-sqlite3 /native-deps/better-sqlite3 && \
+    cp -RL /app/node_modules/bindings /native-deps/bindings && \
+    cp -RL /app/node_modules/file-uri-to-path /native-deps/file-uri-to-path
+
 # ============================================
 # Stage 3: 构建应用
 # ============================================
@@ -55,9 +63,10 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/lib/db/schema.sql ./lib/db/schema.sql
 
 # 复制 better-sqlite3 原生 .node 二进制（standalone 不自动携带）
-COPY --from=deps /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
-COPY --from=deps /app/node_modules/bindings ./node_modules/bindings
-COPY --from=deps /app/node_modules/file-uri-to-path ./node_modules/file-uri-to-path
+# 来源是 deps 阶段解引用后的真实目录，避免 pnpm 符号链接在 runner 中悬空。
+COPY --from=deps /native-deps/better-sqlite3 ./node_modules/better-sqlite3
+COPY --from=deps /native-deps/bindings ./node_modules/bindings
+COPY --from=deps /native-deps/file-uri-to-path ./node_modules/file-uri-to-path
 
 # 创建数据目录并设置权限
 RUN mkdir -p /app/data && chown -R nextjs:nodejs /app
