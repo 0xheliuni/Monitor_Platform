@@ -34,7 +34,7 @@ export default async function NewConfigPage({
 
   const [groups, models, sourceConfig] = await Promise.all([
     adminUser ? listGroups() : Promise.resolve([]),
-    listSelectableModels(),
+    listSelectableModels(user),
     sourceId ? getConfigById(sourceId, user) : Promise.resolve(null),
   ])
 

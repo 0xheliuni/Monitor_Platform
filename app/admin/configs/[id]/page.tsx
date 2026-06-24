@@ -43,7 +43,7 @@ export default async function EditConfigPage({
     return <PageHeader title="编辑配置" description="缺少 service role 凭据，当前页面暂不可用。" />
   }
 
-  const [config, models] = await Promise.all([getConfigById(id, user), listSelectableModels()])
+  const [config, models] = await Promise.all([getConfigById(id, user), listSelectableModels(user)])
 
   if (!config) {
     notFound()

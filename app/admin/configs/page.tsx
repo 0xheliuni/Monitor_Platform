@@ -52,7 +52,7 @@ export default async function ConfigsPage({
   const [configs, templates, models] = await Promise.all([
     listConfigs(user),
     listTemplates(user),
-    listSelectableModels(),
+    listSelectableModels(user),
   ])
   const groupNames = Array.from(
     new Set(

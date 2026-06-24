@@ -145,7 +145,8 @@ async function parseConfigPayload(formData: FormData, user: AppUser) {
   }
 
   if (!isAdminUser(user)) {
-    const selectableModels = await listSelectableModels()
+    // Fix 3: pass user so selectable models are scoped to the member's group
+    const selectableModels = await listSelectableModels(user)
 
     if (!selectableModels.some((item) => item.id === modelId)) {
       throw new Error("所选模型不在当前成员可用范围内")
@@ -272,29 +273,32 @@ export async function batchConfigAction(formData: FormData) {
       throw new Error("部分选中的配置不存在，或你没有权限操作它们，请刷新列表后重试")
     }
 
+    // Derive the scope-validated ID list from the verified configs (Fix 1)
+    const scopedIds = selectedConfigs.map((c) => c.id)
+
     switch (operation) {
       case "enable": {
-        await setConfigsEnabled(ids, true)
-        successMessage = `已启用 ${ids.length} 条配置`
+        await setConfigsEnabled(scopedIds, true)
+        successMessage = `已启用 ${scopedIds.length} 条配置`
         break
       }
       case "disable": {
-        await setConfigsEnabled(ids, false)
-        successMessage = `已停用 ${ids.length} 条配置`
+        await setConfigsEnabled(scopedIds, false)
+        successMessage = `已停用 ${scopedIds.length} 条配置`
         break
       }
       case "maintenance_on": {
-        for (const id of ids) {
+        for (const id of scopedIds) {
           await updateConfig(id, { is_maintenance: true })
         }
-        successMessage = `已将 ${ids.length} 条配置设为维护中`
+        successMessage = `已将 ${scopedIds.length} 条配置设为维护中`
         break
       }
       case "maintenance_off": {
-        for (const id of ids) {
+        for (const id of scopedIds) {
           await updateConfig(id, { is_maintenance: false })
         }
-        successMessage = `已取消 ${ids.length} 条配置的维护模式`
+        successMessage = `已取消 ${scopedIds.length} 条配置的维护模式`
         break
       }
       case "replace_model": {
@@ -315,7 +319,8 @@ export async function batchConfigAction(formData: FormData) {
         }
 
         if (!isAdminUser(user)) {
-          const selectableModels = await listSelectableModels()
+          // Fix 3: pass user so scope check is against member's visible models
+          const selectableModels = await listSelectableModels(user)
 
           if (!selectableModels.some((item) => item.id === targetModelId)) {
             throw new Error("目标模型不在当前成员可用范围内")
@@ -335,10 +340,10 @@ export async function batchConfigAction(formData: FormData) {
           throw new Error("目标模型类型和选中配置类型不一致")
         }
 
-        for (const id of ids) {
+        for (const id of scopedIds) {
           await updateConfig(id, { model_id: targetModelId })
         }
-        successMessage = `已将 ${ids.length} 条配置切换到模型「${targetModel.model}」`
+        successMessage = `已将 ${scopedIds.length} 条配置切换到模型「${targetModel.model}」`
         break
       }
       case "replace_key": {
@@ -348,10 +353,10 @@ export async function batchConfigAction(formData: FormData) {
           throw new Error("API Key 长度不能超过 512 个字符")
         }
 
-        for (const id of ids) {
+        for (const id of scopedIds) {
           await updateConfig(id, { api_key: targetApiKey })
         }
-        successMessage = `已替换 ${ids.length} 条配置的密钥`
+        successMessage = `已替换 ${scopedIds.length} 条配置的密钥`
         break
       }
       case "replace_endpoint": {
@@ -361,10 +366,10 @@ export async function batchConfigAction(formData: FormData) {
           throw new Error("API 地址长度不能超过 2048 个字符")
         }
 
-        for (const id of ids) {
+        for (const id of scopedIds) {
           await updateConfig(id, { endpoint: targetEndpoint })
         }
-        successMessage = `已替换 ${ids.length} 条配置的地址`
+        successMessage = `已替换 ${scopedIds.length} 条配置的地址`
         break
       }
       case "replace_name": {
@@ -374,24 +379,24 @@ export async function batchConfigAction(formData: FormData) {
           throw new Error("名称长度不能超过 255 个字符")
         }
 
-        for (const id of ids) {
+        for (const id of scopedIds) {
           await updateConfig(id, { name: targetName })
         }
-        successMessage = `已替换 ${ids.length} 条配置的名称`
+        successMessage = `已替换 ${scopedIds.length} 条配置的名称`
         break
       }
       case "clear_history": {
-        for (const id of ids) {
+        for (const id of scopedIds) {
           await deleteHistoryByConfig(id)
         }
-        successMessage = `已清理 ${ids.length} 条配置的请求历史`
+        successMessage = `已清理 ${scopedIds.length} 条配置的请求历史`
         break
       }
       case "delete": {
-        for (const id of ids) {
+        for (const id of scopedIds) {
           await deleteConfig(id)
         }
-        successMessage = `已删除 ${ids.length} 条配置`
+        successMessage = `已删除 ${scopedIds.length} 条配置`
         break
       }
     }

@@ -164,19 +164,20 @@ export async function listModels(user?: AppUser): Promise<CheckModelRecord[]> {
   const allTemplates = await dbTemplates.listTemplates()
   const templateMap = new Map(allTemplates.map((t) => [t.id, t]))
 
-  // Build config_count map
-  const allConfigs = await dbConfigs.listConfigs()
+  // Determine scope group: null for admin (global), group name for members
+  const scopeGroup = user && !isAdminUser(user) ? getRequiredGroupName(user) : null
+
+  // Build config_count map scoped to the same group used for model visibility
+  const scopedConfigs = await dbConfigs.listConfigs(scopeGroup)
   const countMap = new Map<string, number>()
-  for (const c of allConfigs) {
+  for (const c of scopedConfigs) {
     countMap.set(c.model_id, (countMap.get(c.model_id) ?? 0) + 1)
   }
 
   let filtered = allModels
 
   if (user && !isAdminUser(user)) {
-    // Scope to models referenced by user's configs
-    const scopeGroup = getRequiredGroupName(user)
-    const scopedConfigs = await dbConfigs.listConfigs(scopeGroup)
+    // Scope to models referenced by user's group configs (same set used for count)
     const scopedModelIds = new Set(scopedConfigs.map((c) => c.model_id))
     filtered = allModels.filter((m) => scopedModelIds.has(m.id))
   }
@@ -196,8 +197,8 @@ export async function listModels(user?: AppUser): Promise<CheckModelRecord[]> {
   })
 }
 
-export async function listSelectableModels(): Promise<CheckModelRecord[]> {
-  return listModels()
+export async function listSelectableModels(user?: AppUser): Promise<CheckModelRecord[]> {
+  return listModels(user)
 }
 
 export async function listModelsByType(type: CheckModelRecord["type"]): Promise<CheckModelRecord[]> {
