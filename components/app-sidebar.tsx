@@ -63,8 +63,8 @@ export function AppSidebar({
                 <TerminalIcon className="size-4" />
               </div>
               <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-medium">check-cx-admin</span>
-                <span className="truncate text-xs">Supabase + Next.js</span>
+                <span className="truncate font-medium">监控平台后台</span>
+                <span className="truncate text-xs">SQLite + Next.js</span>
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>

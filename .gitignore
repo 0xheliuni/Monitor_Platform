@@ -52,3 +52,4 @@ error.log
 
 # openspec
 openspec/changes/
+smoke-*.log

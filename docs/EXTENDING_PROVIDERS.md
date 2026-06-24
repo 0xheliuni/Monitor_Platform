@@ -9,10 +9,10 @@
 
 ### 1.1 数据库枚举与 Schema
 
-`check_configs.type` 使用 Supabase 枚举 `provider_type`。新增 Provider 必须更新数据库：
+`check_configs.type` 存储在本地 SQLite 数据库中。新增 Provider 必须更新 schema：
 
-- `supabase/schema.sql` 与 `supabase/schema-dev.sql`
-- 新建迁移：`ALTER TYPE public.provider_type ADD VALUE ...`（dev schema 同步）
+- 编辑 `lib/db/schema.sql` 更新 check_configs、check_models、check_request_templates 表的约束或默认值（如需）
+- 使用 `sqlite3 cli` 或应用 API 直接修改 SQLite 数据库中的配置记录
 
 ### 1.2 类型与 UI 标识
 
@@ -60,32 +60,30 @@ case "myvendor": {
 
 ## 4. 数据库配置
 
-新增 Provider 后，插入配置：
+新增 Provider 后，使用 `sqlite3` CLI 或应用程序向本地 SQLite 数据库插入配置。表结构定义在 `lib/db/schema.sql`，IDs 由应用生成（`crypto.randomUUID()` 转小写十六进制），时间戳为 ISO8601 TEXT 格式：
 
 ```sql
 -- 1) 注册模板
-INSERT INTO check_request_templates (name, type)
-VALUES ('myvendor-default', 'myvendor')
+INSERT INTO check_request_templates (id, name, type, created_at)
+VALUES ('550e8400e29b41d4a716446655440000', 'myvendor-default', 'myvendor', '2026-06-24T10:00:00Z')
 ON CONFLICT (name) DO NOTHING;
 
 -- 2) 注册模型
-INSERT INTO check_models (type, model, template_id)
-SELECT 'myvendor', 'my-model', id
-FROM check_request_templates
-WHERE name = 'myvendor-default'
+INSERT INTO check_models (id, type, model, template_id, created_at)
+VALUES ('660e8400e29b41d4a716446655440001', 'myvendor', 'my-model', '550e8400e29b41d4a716446655440000', '2026-06-24T10:00:00Z')
 ON CONFLICT (type, model) DO NOTHING;
 
 -- 3) 绑定到配置实例
-INSERT INTO check_configs (name, type, model_id, endpoint, api_key, enabled)
-SELECT 'MyVendor 主力',
-       'myvendor',
-       id,
-       'https://api.myvendor.com/v1/chat/completions',
-       'sk-xxx',
-       true
-FROM check_models
-WHERE type = 'myvendor'
-  AND model = 'my-model';
+INSERT INTO check_configs (id, name, type, model_id, endpoint, api_key, enabled, created_at, updated_at)
+VALUES ('770e8400e29b41d4a716446655440002',
+        'MyVendor 主力',
+        'myvendor',
+        '660e8400e29b41d4a716446655440001',
+        'https://api.myvendor.com/v1/chat/completions',
+        'sk-xxx',
+        true,
+        '2026-06-24T10:00:00Z',
+        '2026-06-24T10:00:00Z');
 ```
 
 如果同一模型需要统一默认参数，请更新 `check_request_templates.request_header` / `check_request_templates.metadata`，再把模板绑定到 `check_models.template_id`。

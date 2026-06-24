@@ -20,10 +20,10 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `app/` hosts the App Router surface; `page.tsx` hydrates dashboard data and `app/api/dashboard/route.ts` exposes the refresh endpoint.
+- `app/` hosts the App Router surface; `page.tsx` hydrates dashboard data and `app/api/dashboard/route.ts` exposes the refresh endpoint. Admin UI lives under `app/admin/*` (protected by ADMIN_LOGIN_KEY).
 - `components/` contains interactive widgets such as `dashboard-view.tsx`, `status-timeline.tsx`, and shared primitives inside `components/ui/`.
-- `lib/` carries domain logic: `core/` for polling and state, `providers/` for OpenAI/Anthropic/Gemini adapters, `database/` plus `supabase/` for persistence helpers, `types/` for DTOs, and `utils/` for helpers like `cn`.
-- Keep assets in `public/`, and store schema or seed changes exclusively in `supabase/migrations/` so Supabase stays reproducible.
+- `lib/` carries domain logic: `core/` for polling and state, `providers/` for OpenAI/Anthropic/Gemini adapters, `db/` for SQLite persistence (schema.sql is authoritative; runMigrations builds it on boot), `types/` for DTOs, and `utils/` for helpers like `cn`.
+- Keep assets in `public/`. Schema changes are made directly to `lib/db/schema.sql`; runMigrations applies them on startup.
 
 ## Build, Test, and Development Commands
 - `pnpm install` syncs dependencies; re-run whenever `pnpm-lock.yaml` changes.
@@ -35,10 +35,10 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 Default to server components and add `"use client"` only when hooks or browser APIs are required. TypeScript files use two-space indentation, `const` bindings, and descriptive PascalCase component names (`DashboardView`). Sort imports Node → packages → `@/` aliases, avoiding long relative paths. Compose styling through Tailwind utility classes plus `clsx`/`tailwind-merge`, and move repeated variants into `components/ui/`.
 
 ## Testing Guidelines
-Automated tests are not wired up yet, but new logic should ship with either Vitest/Jest specs named `*.spec.ts` or clearly documented manual steps. Target ≥80 % coverage on `lib/core` and provider modules; explain any exception in the PR description. Until a runner is introduced, validate by running `pnpm dev`, exercising dashboard refreshes, and replaying Supabase migrations against a staging project before promoting to production.
+Automated tests are not wired up yet, but new logic should ship with either Vitest/Jest specs named `*.spec.ts` or clearly documented manual steps. Target ≥80 % coverage on `lib/core` and provider modules; explain any exception in the PR description. Until a runner is introduced, validate by running `pnpm dev`, exercising dashboard refreshes, and verifying config changes via SQLite CLI before promoting to production.
 
 ## Commit & Pull Request Guidelines
-History follows Conventional Commits (`feat:`, `fix:`, `chore:`, `refactor:`). Keep each commit scoped to a single concern and include related SQL migrations or config edits together. Pull requests must describe the change, link issues, attach UI screenshots/GIFs when visuals move, list the commands executed (build/lint/test), and mention any Supabase migration IDs applied. Request review early for provider updates so credentials and rate limits get a second set of eyes.
+History follows Conventional Commits (`feat:`, `fix:`, `chore:`, `refactor:`). Keep each commit scoped to a single concern and include related schema changes or config edits together. Pull requests must describe the change, link issues, attach UI screenshots/GIFs when visuals move, list the commands executed (build/lint/test), and note any SQLite schema updates applied. Request review early for provider updates so credentials and rate limits get a second set of eyes.
 
 ## Security & Configuration Tips
-Copy `.env.example`, fill in `SUPABASE_*` plus `CHECK_POLL_INTERVAL_SECONDS`, and never commit real keys. Provider credentials belong in the `check_configs` table—seed them with the SQL snippets in `.env.example` instead of plaintext env vars. Use the mock endpoint in `lib/providers/stream-check.ts` for latency tests and scrub client logs before sharing.
+Copy `.env.example`, fill in `SQLITE_DB_PATH` (default ./data/monitor.db), `ADMIN_LOGIN_KEY`, `ADMIN_SESSION_SECRET`, `APP_URL`, `CHECK_POLL_INTERVAL_SECONDS`, and `HISTORY_RETENTION_DAYS`, and never commit real keys. Provider credentials belong in the `check_configs` table—seed them via SQLite CLI or any SQLite client instead of plaintext env vars. Use the mock endpoint in `lib/providers/stream-check.ts` for latency tests and scrub client logs before sharing.

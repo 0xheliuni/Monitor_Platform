@@ -14,10 +14,12 @@ Check CX 是一个 AI 模型健康监控面板，用于实时监控 OpenAI、Gem
 
 - **框架**: Next.js 14+ (App Router)
 - **语言**: TypeScript
-- **数据库**: Supabase (PostgreSQL)
+- **数据库**: SQLite (better-sqlite3)
+- **AI SDK**: Vercel AI SDK
 - **样式**: Tailwind CSS
 - **包管理**: pnpm
 - **部署**: Docker
+- **测试**: vitest (in-memory SQLite)
 
 ## Project Conventions
 
@@ -40,28 +42,32 @@ Check CX 是一个 AI 模型健康监控面板，用于实时监控 OpenAI、Gem
 lib/
 ├── types/          # 统一类型定义
 ├── providers/      # Provider 检查逻辑（OpenAI、Gemini、Anthropic）
-├── database/       # 数据库操作（配置加载、历史记录）
+├── db/             # SQLite 数据层（schema.sql、migrations、查询）
+├── database/       # 公开数据库接口（配置加载、历史记录）
+├── admin/          # Admin 操作接口
 ├── utils/          # 工具函数
-├── core/           # 核心模块（轮询器、全局状态、Dashboard 数据）
-└── supabase/       # Supabase 客户端
+└── core/           # 核心模块（轮询器、全局状态、Dashboard 数据）
 ```
 
 **数据流向**:
-- **后台 → 数据库**: `poller.ts` → `providers/` → `history.ts` → Supabase
-- **数据库 → 前端**: Supabase → `dashboard-data.ts` → `page.tsx` → `dashboard-view.tsx`
+- **后台 → 数据库**: `poller.ts` → `providers/` → `lib/db/*` (SQLite)
+- **数据库 → 前端**: `lib/database/*` → `dashboard-data.ts` → `page.tsx` → `dashboard-view.tsx`
+- **Admin 操作**: `/admin/*` → `lib/admin/*` → `lib/db/*` (SQLite)
 
 **关键模式**:
-- 后台轮询系统在应用启动时自动初始化
+- 后台轮询系统在应用启动时自动初始化，单进程在内存单例（无多节点租赁）
 - 使用全局状态防止 Next.js 热重载时重复创建定时器
 - 所有 Provider 使用流式 API，接收首个响应块即判定成功
 - Dashboard 数据使用基于轮询间隔的缓存
+- 数据库 schema 在 `lib/db/schema.sql` 中定义，应用启动时通过 `runMigrations` 构建
 
 ### Testing Strategy
 
-目前项目未配置自动化测试。手动验证流程：
-1. 本地运行 `pnpm dev` 验证功能
-2. 检查服务器日志确认轮询正常执行
-3. 验证 Dashboard 数据刷新正常
+项目使用 vitest 进行自动化测试，采用 in-memory SQLite 进行数据库测试：
+1. 单元测试和集成测试在 in-memory SQLite 上执行
+2. 本地开发运行 `pnpm dev` 验证功能
+3. 检查服务器日志确认轮询正常执行
+4. 验证 Dashboard 数据刷新正常
 
 ### Git Workflow
 
@@ -101,17 +107,25 @@ lib/
 
 ## External Dependencies
 
-### Supabase
+### SQLite 数据库
 
-数据库服务，存储配置和历史记录：
+本地关系型数据库，存储配置和历史记录：
 
 **环境变量**:
-- `SUPABASE_URL`: Supabase 项目 URL
-- `SUPABASE_PUBLISHABLE_OR_ANON_KEY`: 公开/匿名 key
+- `SQLITE_DB_PATH`: SQLite 数据库文件路径（默认 `./data/db.sqlite`）
+- `ADMIN_LOGIN_KEY`: Admin 登录密钥
+- `ADMIN_SESSION_SECRET`: Admin 会话加密密钥
+- `APP_URL`: 应用基础 URL
+- `CHECK_POLL_INTERVAL_SECONDS`: 轮询间隔秒数
+- `HISTORY_RETENTION_DAYS`: 历史记录保留天数
+- `CHECK_CONCURRENCY`: 并发检测任务数
+- `OFFICIAL_STATUS_CHECK_INTERVAL_SECONDS`: 官方状态检查间隔秒数
 
-**表结构**:
-- `check_configs`: 存储 Provider 配置
-- `check_history`: 存储检测历史记录
+**数据库结构**:
+- Schema 定义在 `lib/db/schema.sql`
+- 数据库迁移在应用启动时通过 `runMigrations` 自动执行
+- 配置管理：使用 `sqlite3` CLI 直接编辑 SQLite DB
+- 表：`check_configs`（Provider 配置）、`check_history`（检测历史）
 
 ### AI Provider APIs
 
