@@ -8,7 +8,7 @@ import {historySnapshotStore} from "../database/history";
 import {loadProviderConfigsFromDB} from "../database/config-loader";
 import {runProviderChecks} from "../providers";
 import {getPollingIntervalMs} from "./polling-config";
-import {getLastPingStartedAt, getPollerTimer, isPollerRunning, setLastPingStartedAt, setPollerRunning, setPollerTimer,} from "./global-state";
+import {getLastPingStartedAt, getPollerTimer, setLastPingStartedAt, setPollerTimer,} from "./global-state";
 import {startOfficialStatusPoller} from "./official-status-poller";
 import type {CheckResult, HealthStatus} from "../types";
 
@@ -126,11 +126,13 @@ async function tick() {
  * 第二次调用（如 Next.js 热重载）为 no-op
  */
 export function startPoller(): void {
-  // 进程内单例守卫：防止 Next.js 开发模式热重载导致重复初始化
-  if (isPollerRunning()) {
+  // 进程内单例守卫：用 timer 句柄作为已启动信号
+  // timer 句柄在 setInterval 后设置且永不被 tick() 清除，是可靠的单调守卫
+  // （不能用 isPollerRunning()：tick() 在 finally 中会将其重置为 false，
+  //   导致 tick 完成后守卫失效，HMR 重新导入时会注册第二个定时器）
+  if (getPollerTimer()) {
     return;
   }
-  setPollerRunning(true);
 
   const firstCheckAt = new Date(Date.now() + POLL_INTERVAL_MS).toISOString();
   console.log(
