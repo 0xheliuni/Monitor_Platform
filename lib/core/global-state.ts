@@ -5,8 +5,6 @@
 
 import type {PingCacheEntry} from "../types";
 
-export type PollerRole = "leader" | "standby";
-
 /**
  * 扩展 globalThis 类型
  */
@@ -14,8 +12,6 @@ declare global {
   var __checkCxPoller: NodeJS.Timeout | undefined;
   var __checkCxPollerRunning: boolean | undefined;
   var __checkCxLastPingStartedAt: number | undefined;
-  var __checkCxPollerLeaderTimer: NodeJS.Timeout | undefined;
-  var __checkCxPollerRole: PollerRole | undefined;
   var __CHECK_CX_PING_CACHE__: Record<string, PingCacheEntry> | undefined;
 }
 
@@ -34,35 +30,7 @@ export function setPollerTimer(timer: NodeJS.Timeout): void {
 }
 
 /**
- * 获取主节点选举定时器
- */
-export function getPollerLeaderTimer(): NodeJS.Timeout | undefined {
-  return globalThis.__checkCxPollerLeaderTimer;
-}
-
-/**
- * 设置主节点选举定时器
- */
-export function setPollerLeaderTimer(timer: NodeJS.Timeout): void {
-  globalThis.__checkCxPollerLeaderTimer = timer;
-}
-
-/**
- * 获取当前节点角色
- */
-export function getPollerRole(): PollerRole {
-  return globalThis.__checkCxPollerRole ?? "standby";
-}
-
-/**
- * 设置当前节点角色
- */
-export function setPollerRole(role: PollerRole): void {
-  globalThis.__checkCxPollerRole = role;
-}
-
-/**
- * 获取轮询器运行状态
+ * 获取轮询器运行状态（进程内单例守卫）
  */
 export function isPollerRunning(): boolean {
   return globalThis.__checkCxPollerRunning ?? false;

@@ -1,15 +1,15 @@
 /**
  * 后台轮询器
  * 在应用启动时自动初始化并持续运行
+ * 使用进程内单例守卫替代多节点租约机制
  */
 
 import {historySnapshotStore} from "../database/history";
 import {loadProviderConfigsFromDB} from "../database/config-loader";
 import {runProviderChecks} from "../providers";
 import {getPollingIntervalMs} from "./polling-config";
-import {getLastPingStartedAt, getPollerTimer, setLastPingStartedAt, setPollerTimer,} from "./global-state";
+import {getLastPingStartedAt, getPollerTimer, isPollerRunning, setLastPingStartedAt, setPollerRunning, setPollerTimer,} from "./global-state";
 import {startOfficialStatusPoller} from "./official-status-poller";
-import {ensurePollerLeadership, isPollerLeader} from "./poller-leadership";
 import type {CheckResult, HealthStatus} from "../types";
 
 const POLL_INTERVAL_MS = getPollingIntervalMs();
@@ -85,18 +85,9 @@ function logFailedResultsByGroup(results: CheckResult[]): void {
 }
 
 /**
- * 执行一次轮询检查
+ * 执行一次轮询检查（内部并发锁：跳过仍在执行的轮次）
  */
 async function tick() {
-  try {
-    await ensurePollerLeadership();
-  } catch (error) {
-    console.error("[check-cx] 主节点选举失败，跳过本轮轮询", error);
-    return;
-  }
-  if (!isPollerLeader()) {
-    return;
-  }
   // 原子操作：检查并设置运行状态
   if (globalThis.__checkCxPollerRunning) {
     const lastStartedAt = getLastPingStartedAt();
@@ -130,15 +121,21 @@ async function tick() {
   }
 }
 
-// 自动初始化轮询器
-if (!getPollerTimer()) {
+/**
+ * 启动后台轮询器（进程内单例守卫）
+ * 第二次调用（如 Next.js 热重载）为 no-op
+ */
+export function startPoller(): void {
+  // 进程内单例守卫：防止 Next.js 开发模式热重载导致重复初始化
+  if (isPollerRunning()) {
+    return;
+  }
+  setPollerRunning(true);
+
   const firstCheckAt = new Date(Date.now() + POLL_INTERVAL_MS).toISOString();
   console.log(
     `[check-cx] 初始化后台轮询器，interval=${POLL_INTERVAL_MS}ms，首次检测预计 ${firstCheckAt}`
   );
-  ensurePollerLeadership().catch((error) => {
-    console.error("[check-cx] 初始化主节点选举失败", error);
-  });
   const timer = setInterval(() => {
     tick().catch((error) => console.error("[check-cx] 定时检测失败", error));
   }, POLL_INTERVAL_MS);
@@ -147,3 +144,6 @@ if (!getPollerTimer()) {
   // 启动官方状态轮询器
   startOfficialStatusPoller();
 }
+
+// 自动初始化轮询器（模块首次加载时执行）
+startPoller();
