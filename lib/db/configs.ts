@@ -111,9 +111,11 @@ export async function updateConfig(id: string, input: Partial<ConfigInput>): Pro
   ).get(id) as { id: string; type: string; model_id: string } | undefined;
   if (!existing) return null;
 
-  const newType = input.type ?? existing.type;
-  const newModelId = input.model_id ?? existing.model_id;
-  await checkModelType(newModelId, newType);
+  if (input.type !== undefined || input.model_id !== undefined) {
+    const newType = input.type ?? existing.type;
+    const newModelId = input.model_id ?? existing.model_id;
+    await checkModelType(newModelId, newType);
+  }
 
   const now = nowIso();
   const sets: string[] = ["updated_at = ?"];
@@ -142,7 +144,7 @@ export async function setConfigsEnabled(ids: string[], enabled: boolean): Promis
   const placeholders = ids.map(() => "?").join(",");
   db.prepare(
     `UPDATE check_configs SET enabled = ?, updated_at = ? WHERE id IN (${placeholders})`
-  ).run(fromBool(enabled), nowIso(), ...ids);
+  ).run([fromBool(enabled), nowIso(), ...ids]);
 }
 
 export async function deleteHistoryByConfig(id: string): Promise<void> {
@@ -172,10 +174,12 @@ export async function loadEnabledConfigsWithModelTemplate(): Promise<ConfigWithM
     is_maintenance: number; group_name: string | null; model: string; model_type: string;
     tpl_type: string | null; request_header: string | null; metadata: string | null;
   }>;
-  return rows.map((r) => ({
+  return rows
+    .filter((r) => r.model_type === r.type)
+    .map((r) => ({
     id: r.id, name: r.name, type: r.type, endpoint: r.endpoint, api_key: r.api_key,
     is_maintenance: toBool(r.is_maintenance as 0 | 1), group_name: r.group_name,
-    model: r.model_type === r.type ? r.model : "",
+    model: r.model,
     request_header: r.tpl_type === r.type ? fromJson<Record<string, string>>(r.request_header) : null,
     metadata: r.tpl_type === r.type ? fromJson<Record<string, unknown>>(r.metadata) : null,
   }));

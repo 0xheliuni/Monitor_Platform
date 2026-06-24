@@ -32,7 +32,7 @@ export async function getGroupByName(name: string): Promise<GroupRow | null> {
   return row ?? null;
 }
 
-export async function getGroup(id: string): Promise<GroupRow | null> {
+async function getGroup(id: string): Promise<GroupRow | null> {
   const db = getDb();
   const row = db.prepare(
     `SELECT id,group_name,website_url,tags,created_at,updated_at FROM group_info WHERE id = ?`

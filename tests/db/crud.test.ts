@@ -6,7 +6,7 @@ import { __setDbForTest } from "@/lib/db/client";
 import { createTemplate, listTemplates, updateTemplate } from "@/lib/db/templates";
 import { createModel, listModels } from "@/lib/db/models";
 import { createGroup, listGroups, updateGroup } from "@/lib/db/groups";
-import { createNotification, listNotifications, listActiveNotifications } from "@/lib/db/notifications";
+import { createNotification, listNotifications, listActiveNotifications, updateNotification, getNotification } from "@/lib/db/notifications";
 
 function seed() {
   const db = new Database(":memory:");
@@ -94,5 +94,14 @@ describe("notifications CRUD", () => {
     const active = await listActiveNotifications();
     expect(active.some((r) => r.id === a.id)).toBe(true);
     expect(active.some((r) => r.id === b.id)).toBe(false);
+  });
+
+  it("updateNotification 更新 message 和 is_active 后持久化", async () => {
+    const n = await createNotification({ message: "Original message", is_active: true, level: "info" });
+    await updateNotification(n.id, { message: "Updated message", is_active: false });
+    const updated = await getNotification(n.id);
+    expect(updated).not.toBeNull();
+    expect(updated!.message).toBe("Updated message");
+    expect(updated!.is_active).toBe(false);
   });
 });

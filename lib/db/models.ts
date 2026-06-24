@@ -42,7 +42,7 @@ export async function getModel(id: string): Promise<ModelRow | null> {
 }
 
 export async function createModel(input: ModelInput): Promise<ModelRow> {
-  if (input.template_id) {
+  if (input.template_id != null) {
     await checkTemplateType(input.template_id, input.type);
   }
   const db = getDb();
@@ -65,7 +65,7 @@ export async function updateModel(id: string, input: Partial<ModelInput>): Promi
   const newType = input.type ?? existing.type;
   const newTemplateId = "template_id" in input ? (input.template_id ?? null) : existing.template_id;
 
-  if (newTemplateId) {
+  if (newTemplateId != null) {
     await checkTemplateType(newTemplateId, newType);
   }
 
