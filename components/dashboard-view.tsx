@@ -236,7 +236,7 @@ function GroupPanel({
         )}
         <CollapsibleTrigger className="group flex flex-1 min-w-0 items-center gap-3 text-left transition hover:opacity-80 focus-visible:outline-none sm:gap-4">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-black/5 transition-colors group-hover:bg-white/80 dark:bg-white/10 dark:ring-white/10 sm:h-10 sm:w-10">
-            <ChevronDown className="h-4 w-4 text-foreground transition-transform duration-200 group-data-[state=open]:rotate-180 sm:h-5 sm:w-5" />
+            <ChevronDown className="h-4 w-4 text-foreground transition-transform duration-200 group-data-panel-open:rotate-180 sm:h-5 sm:w-5" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2 sm:gap-3">
