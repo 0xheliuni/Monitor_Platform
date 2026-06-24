@@ -4,7 +4,7 @@
 
 import "server-only";
 
-import {createAdminClient} from "../supabase/admin";
+import { getAvailabilityStats as dbGetAvailabilityStats } from "@/lib/db/availability";
 import {getPollingIntervalMs} from "../core/polling-config";
 import type {AvailabilityStats} from "../types/database";
 import type {AvailabilityStat, AvailabilityStatsMap} from "../types";
@@ -106,21 +106,14 @@ export async function getAvailabilityStats(
   }
   metrics.misses += 1;
 
-  const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("availability_stats")
-    .select("config_id, period, total_checks, operational_count, availability_pct")
-    .order("config_id", { ascending: true })
-    .order("period", { ascending: true });
-
-  if (error) {
+  try {
+    const data = await dbGetAvailabilityStats(normalizedIds);
+    const mapped = mapRows(data as AvailabilityStats[] | null);
+    cache.data = mapped;
+    cache.lastFetchedAt = now;
+    return filterStats(mapped, normalizedIds);
+  } catch (error) {
     logError("读取可用性统计失败", error);
     return {};
   }
-
-  const mapped = mapRows(data as AvailabilityStats[] | null);
-  cache.data = mapped;
-  cache.lastFetchedAt = now;
-
-  return filterStats(mapped, normalizedIds);
 }

@@ -1,5 +1,5 @@
 import "server-only";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { listGroups } from "@/lib/db/groups";
 import { getPollingIntervalMs } from "@/lib/core/polling-config";
 import type { GroupInfoRow } from "@/lib/types/database";
 
@@ -46,22 +46,16 @@ export async function loadGroupInfos(options?: {
   }
   metrics.misses += 1;
 
-  const supabase = createAdminClient();
-
-  const { data, error } = await supabase
-    .from("group_info")
-    .select("*")
-    .order("group_name", { ascending: true });
-
-  if (error) {
+  try {
+    const rows = await listGroups();
+    const mapped = rows as GroupInfoRow[];
+    cache.data = mapped;
+    cache.lastFetchedAt = now;
+    return mapped;
+  } catch (error) {
     console.error("Failed to load group info:", error);
     return [];
   }
-
-  const rows = (data as GroupInfoRow[]) ?? [];
-  cache.data = rows;
-  cache.lastFetchedAt = now;
-  return rows;
 }
 
 /**
