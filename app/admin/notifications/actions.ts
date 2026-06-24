@@ -1,4 +1,4 @@
-﻿"use server"
+"use server"
 
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
@@ -11,7 +11,11 @@ import {
   requiredString,
   withMessage,
 } from "@/lib/admin/forms"
-import { createAdminClient } from "@/lib/admin/supabase-admin"
+import {
+  createNotification,
+  updateNotification,
+  deleteNotification,
+} from "@/lib/db/notifications"
 
 function getPayload(formData: FormData) {
   return {
@@ -25,14 +29,7 @@ export async function createNotificationAction(formData: FormData) {
   await requireAdminUser()
 
   try {
-    const client = createAdminClient()
-    const { error } = await client
-      .from("system_notifications")
-      .insert(getPayload(formData))
-
-    if (error) {
-      throw error
-    }
+    await createNotification(getPayload(formData))
   } catch (error) {
     const message = error instanceof Error ? error.message : "创建通知失败"
     redirect(withMessage("/admin/notifications/new", "error", message))
@@ -49,15 +46,7 @@ export async function updateNotificationAction(formData: FormData) {
   const id = requiredString(formData, "id", "通知 ID")
 
   try {
-    const client = createAdminClient()
-    const { error } = await client
-      .from("system_notifications")
-      .update(getPayload(formData))
-      .eq("id", id)
-
-    if (error) {
-      throw error
-    }
+    await updateNotification(id, getPayload(formData))
   } catch (error) {
     const message = error instanceof Error ? error.message : "更新通知失败"
     redirect(withMessage(`/admin/notifications/${id}`, "error", message))
@@ -77,15 +66,7 @@ export async function toggleNotificationActiveAction(formData: FormData) {
   const returnTo = optionalString(formData, "return_to")
 
   try {
-    const client = createAdminClient()
-    const { error } = await client
-      .from("system_notifications")
-      .update({ is_active: isActive })
-      .eq("id", id)
-
-    if (error) {
-      throw error
-    }
+    await updateNotification(id, { is_active: isActive })
   } catch (error) {
     const message = error instanceof Error ? error.message : "切换通知状态失败"
     const fallbackPath = returnTo?.startsWith("/admin/notifications")
@@ -113,15 +94,7 @@ export async function deleteNotificationAction(formData: FormData) {
   const id = requiredString(formData, "id", "通知 ID")
 
   try {
-    const client = createAdminClient()
-    const { error } = await client
-      .from("system_notifications")
-      .delete()
-      .eq("id", id)
-
-    if (error) {
-      throw error
-    }
+    await deleteNotification(id)
   } catch (error) {
     const message = error instanceof Error ? error.message : "删除通知失败"
     redirect(withMessage(`/admin/notifications/${id}`, "error", message))

@@ -1,15 +1,11 @@
-﻿"use server"
+"use server"
 
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 
 import { requireAdminUser } from "@/lib/admin/auth"
-import {
-  optionalString,
-  requiredString,
-  withMessage,
-} from "@/lib/admin/forms"
-import { createAdminClient } from "@/lib/admin/supabase-admin"
+import { optionalString, requiredString, withMessage } from "@/lib/admin/forms"
+import { createGroup, updateGroup, deleteGroup } from "@/lib/db/groups"
 
 function getPayload(formData: FormData) {
   return {
@@ -23,12 +19,7 @@ export async function createGroupAction(formData: FormData) {
   await requireAdminUser()
 
   try {
-    const client = createAdminClient()
-    const { error } = await client.from("group_info").insert(getPayload(formData))
-
-    if (error) {
-      throw error
-    }
+    await createGroup(getPayload(formData))
   } catch (error) {
     const message = error instanceof Error ? error.message : "创建分组失败"
     redirect(withMessage("/admin/groups/new", "error", message))
@@ -45,15 +36,7 @@ export async function updateGroupAction(formData: FormData) {
   const id = requiredString(formData, "id", "分组 ID")
 
   try {
-    const client = createAdminClient()
-    const { error } = await client
-      .from("group_info")
-      .update(getPayload(formData))
-      .eq("id", id)
-
-    if (error) {
-      throw error
-    }
+    await updateGroup(id, getPayload(formData))
   } catch (error) {
     const message = error instanceof Error ? error.message : "更新分组失败"
     redirect(withMessage(`/admin/groups/${id}`, "error", message))
@@ -71,12 +54,7 @@ export async function deleteGroupAction(formData: FormData) {
   const id = requiredString(formData, "id", "分组 ID")
 
   try {
-    const client = createAdminClient()
-    const { error } = await client.from("group_info").delete().eq("id", id)
-
-    if (error) {
-      throw error
-    }
+    await deleteGroup(id)
   } catch (error) {
     const message = error instanceof Error ? error.message : "删除分组失败"
     redirect(withMessage(`/admin/groups/${id}`, "error", message))

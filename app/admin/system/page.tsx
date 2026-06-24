@@ -9,20 +9,14 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { requireAppUser } from "@/lib/admin/auth"
-import { formatDateTime } from "@/lib/admin/format"
 import { isAdminUser } from "@/lib/admin/permissions"
-import { getPollerLease, listAvailabilityStats, listConfigs } from "@/lib/admin/queries"
-import { hasAdminDatabaseEnv } from "@/lib/admin/server-env"
+import { listAvailabilityStats, listConfigs } from "@/lib/admin/queries"
 
 export default async function SystemPage() {
   const user = await requireAppUser()
   const adminUser = isAdminUser(user)
-  if (!hasAdminDatabaseEnv()) {
-    return <PageHeader title="运行状态" description="缺少 service role 凭据，当前页面暂不可用。" />
-  }
 
-  const [lease, stats, configs] = await Promise.all([
-    adminUser ? getPollerLease() : Promise.resolve(null),
+  const [stats, configs] = await Promise.all([
     listAvailabilityStats(user),
     listConfigs(user),
   ])
@@ -43,7 +37,7 @@ export default async function SystemPage() {
         title="运行状态"
         description={
           adminUser
-            ? "查看关键运行信息，包括租约状态和配置可用性。"
+            ? "查看关键运行信息，包括配置可用性。"
             : `这里只展示分组「${user.groupName}」的配置可用性。`
         }
       />
@@ -51,25 +45,17 @@ export default async function SystemPage() {
         {adminUser ? (
           <Card>
             <CardHeader>
-              <CardTitle>轮询租约</CardTitle>
-              <CardDescription>显示主节点租约状态，用于确认多节点轮询是否正常。</CardDescription>
+              <CardTitle>轮询器状态</CardTitle>
+              <CardDescription>轮询器：进程内单实例运行</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <div className="flex items-center justify-between rounded-lg border p-3">
-                <span className="text-muted-foreground">租约键</span>
-                <span className="font-medium">{lease?.lease_key ?? "poller"}</span>
+                <span className="text-muted-foreground">运行模式</span>
+                <span className="font-medium">进程内单实例</span>
               </div>
               <div className="flex items-center justify-between rounded-lg border p-3">
-                <span className="text-muted-foreground">Leader</span>
-                <span className="font-medium">{lease?.leader_id ?? "暂无"}</span>
-              </div>
-              <div className="flex items-center justify-between rounded-lg border p-3">
-                <span className="text-muted-foreground">租约到期</span>
-                <span className="font-medium">{formatDateTime(lease?.lease_expires_at)}</span>
-              </div>
-              <div className="flex items-center justify-between rounded-lg border p-3">
-                <span className="text-muted-foreground">最后更新时间</span>
-                <span className="font-medium">{formatDateTime(lease?.updated_at)}</span>
+                <span className="text-muted-foreground">状态</span>
+                <Badge variant="default">运行中</Badge>
               </div>
             </CardContent>
           </Card>
@@ -77,7 +63,7 @@ export default async function SystemPage() {
         <Card>
           <CardHeader>
             <CardTitle>配置可用性</CardTitle>
-            <CardDescription>基于 `availability_stats` 视图，展示 7/15/30 天窗口。</CardDescription>
+            <CardDescription>基于历史检查数据，展示 7/15/30 天窗口。</CardDescription>
           </CardHeader>
           <CardContent className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-sm">

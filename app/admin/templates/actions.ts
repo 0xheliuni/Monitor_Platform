@@ -1,4 +1,4 @@
-﻿"use server"
+"use server"
 
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
@@ -6,7 +6,13 @@ import { redirect } from "next/navigation"
 import { requireAdminUser } from "@/lib/admin/auth"
 import { parseProviderType, requiredString, withMessage } from "@/lib/admin/forms"
 import { parseOptionalJson } from "@/lib/admin/json"
-import { createAdminClient } from "@/lib/admin/supabase-admin"
+import {
+  createTemplate,
+  updateTemplate,
+  deleteTemplate,
+  listTemplates,
+  countModelsByTemplate,
+} from "@/lib/db/templates"
 
 function getActionErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message) {
@@ -30,8 +36,8 @@ async function parseTemplatePayload(formData: FormData) {
   return {
     name: requiredString(formData, "name", "模板名称"),
     type: parseProviderType(requiredString(formData, "type", "Provider 类型")),
-    request_header: parseOptionalJson(formData.get("request_header"), "请求头 JSON"),
-    metadata: parseOptionalJson(formData.get("metadata"), "metadata JSON"),
+    request_header: parseOptionalJson(formData.get("request_header"), "请求头 JSON") as Record<string, string> | null,
+    metadata: parseOptionalJson(formData.get("metadata"), "metadata JSON") as Record<string, unknown> | null,
   }
 }
 
@@ -40,12 +46,7 @@ export async function createTemplateAction(formData: FormData) {
 
   try {
     const payload = await parseTemplatePayload(formData)
-    const client = createAdminClient()
-    const { error } = await client.from("check_request_templates").insert(payload)
-
-    if (error) {
-      throw error
-    }
+    await createTemplate(payload)
   } catch (error) {
     const message = getActionErrorMessage(error, "创建模板失败")
     redirect(withMessage("/admin/templates/new", "error", message))
@@ -64,12 +65,7 @@ export async function updateTemplateAction(formData: FormData) {
 
   try {
     const payload = await parseTemplatePayload(formData)
-    const client = createAdminClient()
-    const { error } = await client.from("check_request_templates").update(payload).eq("id", id)
-
-    if (error) {
-      throw error
-    }
+    await updateTemplate(id, payload)
   } catch (error) {
     const message = getActionErrorMessage(error, "更新模板失败")
     redirect(withMessage(`/admin/templates/${id}`, "error", message))
@@ -87,25 +83,13 @@ export async function deleteTemplateAction(formData: FormData) {
   const id = requiredString(formData, "id", "模板 ID")
 
   try {
-    const client = createAdminClient()
-    const { count, error: countError } = await client
-      .from("check_models")
-      .select("id", { count: "exact", head: true })
-      .eq("template_id", id)
+    const count = await countModelsByTemplate(id)
 
-    if (countError) {
-      throw countError
-    }
-
-    if ((count ?? 0) > 0) {
+    if (count > 0) {
       throw new Error("该模板仍被模型引用，不能删除")
     }
 
-    const { error } = await client.from("check_request_templates").delete().eq("id", id)
-
-    if (error) {
-      throw error
-    }
+    await deleteTemplate(id)
   } catch (error) {
     const message = getActionErrorMessage(error, "删除模板失败")
     redirect(withMessage(`/admin/templates/${id}`, "error", message))
@@ -123,39 +107,20 @@ export async function cleanupUnusedTemplatesAction() {
   let successMessage = ""
 
   try {
-    const client = createAdminClient()
-    const [{ data: templates, error: templatesError }, usedModels] = await Promise.all([
-      client.from("check_request_templates").select("id"),
-      client.from("check_models").select("template_id"),
-    ])
+    const allTemplates = await listTemplates()
+    const unusedTemplateIds: string[] = []
 
-    if (templatesError) {
-      throw templatesError
+    for (const t of allTemplates) {
+      const count = await countModelsByTemplate(t.id)
+      if (count === 0) unusedTemplateIds.push(t.id)
     }
-
-    if (usedModels.error) {
-      throw usedModels.error
-    }
-
-    const usedTemplateIds = new Set(
-      (usedModels.data ?? [])
-        .map((item) => item.template_id)
-        .filter(Boolean)
-    )
-
-    const unusedTemplateIds = (templates ?? [])
-      .map((item) => item.id)
-      .filter((id) => !usedTemplateIds.has(id))
 
     if (unusedTemplateIds.length === 0) {
       successMessage = "没有可清理的未引用模板"
     } else {
-      const { error } = await client.from("check_request_templates").delete().in("id", unusedTemplateIds)
-
-      if (error) {
-        throw error
+      for (const id of unusedTemplateIds) {
+        await deleteTemplate(id)
       }
-
       successMessage = `已清理 ${unusedTemplateIds.length} 条未引用模板`
     }
   } catch (error) {

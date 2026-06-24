@@ -16,10 +16,10 @@ import { formatDateTime } from "@/lib/admin/format"
 import { isAdminUser } from "@/lib/admin/permissions"
 import {
   getDashboardSummary,
-  getPollerLease,
   listNotifications,
   listRecentHistory,
 } from "@/lib/admin/queries"
+import type { SystemNotificationRecord } from "@/lib/admin/types"
 import { hasAdminDatabaseEnv } from "@/lib/admin/server-env"
 
 const quickLinks = [
@@ -61,11 +61,10 @@ export default async function DashboardPage() {
     )
   }
 
-  const [summary, recentHistory, lease, notifications] = await Promise.all([
+  const [summary, recentHistory, notifications] = await Promise.all([
     getDashboardSummary(user),
     listRecentHistory(user, 8),
-    adminUser ? getPollerLease() : Promise.resolve(null),
-    adminUser ? listNotifications() : Promise.resolve([]),
+    adminUser ? listNotifications() : Promise.resolve([] as SystemNotificationRecord[]),
   ])
 
   return (
@@ -160,21 +159,13 @@ export default async function DashboardPage() {
         {adminUser ? (
           <Card>
             <CardHeader>
-              <CardTitle>轮询主节点</CardTitle>
-              <CardDescription>优先确认轮询节点租约状态是否正常。</CardDescription>
+              <CardTitle>轮询器状态</CardTitle>
+              <CardDescription>轮询器：进程内单实例运行</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
               <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
-                <span className="text-muted-foreground">租约键</span>
-                <span className="font-medium">{lease?.lease_key ?? "poller"}</span>
-              </div>
-              <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
-                <span className="text-muted-foreground">Leader</span>
-                <span className="font-medium">{lease?.leader_id ?? "暂无"}</span>
-              </div>
-              <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
-                <span className="text-muted-foreground">租约到期</span>
-                <span className="font-medium">{formatDateTime(lease?.lease_expires_at)}</span>
+                <span className="text-muted-foreground">运行模式</span>
+                <span className="font-medium">进程内单实例</span>
               </div>
             </CardContent>
           </Card>

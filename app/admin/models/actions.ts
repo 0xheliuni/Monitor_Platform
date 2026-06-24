@@ -1,11 +1,12 @@
-﻿"use server"
+"use server"
 
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 
 import { requireAdminUser } from "@/lib/admin/auth"
 import { optionalString, parseProviderType, requiredString, withMessage } from "@/lib/admin/forms"
-import { createAdminClient } from "@/lib/admin/supabase-admin"
+import { createModel, updateModel, deleteModel, listModels, countConfigsByModel } from "@/lib/db/models"
+import { getTemplate } from "@/lib/db/templates"
 
 function getActionErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message) {
@@ -26,20 +27,11 @@ function getActionErrorMessage(error: unknown, fallback: string) {
 }
 
 async function parseModelPayload(formData: FormData) {
-  const client = createAdminClient()
   const type = parseProviderType(requiredString(formData, "type", "Provider 类型"))
   const templateId = optionalString(formData, "template_id")
 
   if (templateId) {
-    const { data: template, error } = await client
-      .from("check_request_templates")
-      .select("id, type")
-      .eq("id", templateId)
-      .maybeSingle()
-
-    if (error) {
-      throw error
-    }
+    const template = await getTemplate(templateId)
 
     if (!template) {
       throw new Error("所选模板不存在")
@@ -62,12 +54,7 @@ export async function createModelAction(formData: FormData) {
 
   try {
     const payload = await parseModelPayload(formData)
-    const client = createAdminClient()
-    const { error } = await client.from("check_models").insert(payload)
-
-    if (error) {
-      throw error
-    }
+    await createModel(payload)
   } catch (error) {
     const message = getActionErrorMessage(error, "创建模型失败")
     redirect(withMessage("/admin/models/new", "error", message))
@@ -87,12 +74,7 @@ export async function updateModelAction(formData: FormData) {
 
   try {
     const payload = await parseModelPayload(formData)
-    const client = createAdminClient()
-    const { error } = await client.from("check_models").update(payload).eq("id", id)
-
-    if (error) {
-      throw error
-    }
+    await updateModel(id, payload)
   } catch (error) {
     const message = getActionErrorMessage(error, "更新模型失败")
     redirect(withMessage(`/admin/models/${id}`, "error", message))
@@ -111,25 +93,13 @@ export async function deleteModelAction(formData: FormData) {
   const id = requiredString(formData, "id", "模型 ID")
 
   try {
-    const client = createAdminClient()
-    const { count, error: countError } = await client
-      .from("check_configs")
-      .select("id", { count: "exact", head: true })
-      .eq("model_id", id)
+    const count = await countConfigsByModel(id)
 
-    if (countError) {
-      throw countError
-    }
-
-    if ((count ?? 0) > 0) {
+    if (count > 0) {
       throw new Error("该模型仍被配置引用，不能删除")
     }
 
-    const { error } = await client.from("check_models").delete().eq("id", id)
-
-    if (error) {
-      throw error
-    }
+    await deleteModel(id)
   } catch (error) {
     const message = getActionErrorMessage(error, "删除模型失败")
     redirect(withMessage(`/admin/models/${id}`, "error", message))
@@ -148,39 +118,20 @@ export async function cleanupUnusedModelsAction() {
   let successMessage = ""
 
   try {
-    const client = createAdminClient()
-    const [{ data: models, error: modelsError }, usedConfigs] = await Promise.all([
-      client.from("check_models").select("id"),
-      client.from("check_configs").select("model_id"),
-    ])
+    const allModels = await listModels()
+    const unusedModelIds: string[] = []
 
-    if (modelsError) {
-      throw modelsError
+    for (const m of allModels) {
+      const count = await countConfigsByModel(m.id)
+      if (count === 0) unusedModelIds.push(m.id)
     }
-
-    if (usedConfigs.error) {
-      throw usedConfigs.error
-    }
-
-    const usedModelIds = new Set(
-      (usedConfigs.data ?? [])
-        .map((item) => item.model_id)
-        .filter(Boolean)
-    )
-
-    const unusedModelIds = (models ?? [])
-      .map((item) => item.id)
-      .filter((id) => !usedModelIds.has(id))
 
     if (unusedModelIds.length === 0) {
       successMessage = "没有可清理的未引用模型"
     } else {
-      const { error } = await client.from("check_models").delete().in("id", unusedModelIds)
-
-      if (error) {
-        throw error
+      for (const id of unusedModelIds) {
+        await deleteModel(id)
       }
-
       successMessage = `已清理 ${unusedModelIds.length} 条未引用模型`
     }
   } catch (error) {

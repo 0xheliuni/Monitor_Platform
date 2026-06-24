@@ -72,7 +72,8 @@ vi.mock("@/lib/database/history", () => ({
 }));
 
 describe("poller single-instance guard", () => {
-  let setIntervalSpy: ReturnType<typeof vi.spyOn>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let setIntervalSpy: ReturnType<typeof vi.spyOn<any, any>>;
 
   beforeEach(() => {
     // Reset timer guard and per-tick lock before each test

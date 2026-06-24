@@ -10,675 +10,391 @@ import {
   CheckRequestTemplateRecord,
   DashboardSummary,
   GroupInfoRecord,
-  PollerLeaseRecord,
   SystemNotificationRecord,
 } from "@/lib/admin/types"
 import { getRequiredGroupName, isAdminUser } from "@/lib/admin/permissions"
-import { createAdminClient } from "@/lib/admin/supabase-admin"
 
-type CountResult = {
-  count: number | null
-  error: Error | null
+import * as dbConfigs from "@/lib/db/configs"
+import * as dbModels from "@/lib/db/models"
+import * as dbTemplates from "@/lib/db/templates"
+import * as dbGroups from "@/lib/db/groups"
+import * as dbNotifications from "@/lib/db/notifications"
+import { getRecentCheckHistory } from "@/lib/db/history"
+import { getAvailabilityStats } from "@/lib/db/availability"
+
+// ─── scope helpers ───────────────────────────────────────────────────────────
+
+/** Returns null for admin (= no filter), or a group name string for members. */
+function getScopeGroup(user: AppUser): string | null {
+  if (isAdminUser(user)) return null
+  return getRequiredGroupName(user)
 }
 
-type CountQuery = PromiseLike<CountResult> & {
-  eq: (column: string, value: unknown) => CountQuery
-  in: (column: string, values: readonly string[]) => CountQuery
+/**
+ * Returns null for admin (no id restriction), or an array of config ids
+ * belonging to the user's group. Returns empty array if group has no configs.
+ */
+async function listScopedConfigIds(user: AppUser): Promise<string[] | null> {
+  if (isAdminUser(user)) return null
+  const scopeGroup = getRequiredGroupName(user)
+  const configs = await dbConfigs.listConfigs(scopeGroup)
+  return configs.map((c) => c.id)
 }
 
-type ScopedConfigReference = {
-  id: string
-  model_id: string
-  group_name: string | null
+// ─── config shape mapping ─────────────────────────────────────────────────────
+
+/**
+ * listConfigs returns ConfigRow (no model/template_name).
+ * We need to enrich with model name + template info via a models lookup.
+ */
+async function enrichConfigs(rows: dbConfigs.ConfigRow[]): Promise<CheckConfigRecord[]> {
+  if (rows.length === 0) return []
+
+  // Fetch all models in one call, then build a lookup map
+  const allModels = await dbModels.listModels()
+  const modelMap = new Map(allModels.map((m) => [m.id, m]))
+
+  // Fetch all templates
+  const allTemplates = await dbTemplates.listTemplates()
+  const templateMap = new Map(allTemplates.map((t) => [t.id, t]))
+
+  return rows.map((row) => {
+    const model = modelMap.get(row.model_id)
+    const template = model?.template_id ? templateMap.get(model.template_id) : undefined
+    return {
+      id: row.id,
+      name: row.name,
+      type: row.type as CheckConfigRecord["type"],
+      model_id: row.model_id,
+      model: model?.model ?? "",
+      template_id: model?.template_id ?? null,
+      template_name: template?.name ?? null,
+      endpoint: row.endpoint,
+      api_key: row.api_key,
+      enabled: row.enabled,
+      is_maintenance: row.is_maintenance,
+      group_name: row.group_name,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    }
+  })
 }
 
-async function countRows(
-  table: string,
-  apply?: (query: CountQuery) => CountQuery
-) {
-  const client = createAdminClient()
-  let query = client.from(table).select("*", { count: "exact", head: true }) as unknown as CountQuery
-
-  if (apply) {
-    query = apply(query)
-  }
-
-  const { count, error } = await query
-
-  if (error) {
-    throw error
-  }
-
-  return count ?? 0
-}
-
-// Supabase query builder generics are too deeply nested here; keep the boundary local.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function applyConfigScope(query: any, user: AppUser) {
-  if (isAdminUser(user)) {
-    return query
-  }
-
-  return query.eq("group_name", getRequiredGroupName(user))
-}
-
-async function listScopedConfigReferences(user: AppUser) {
-  if (isAdminUser(user)) {
-    return null
-  }
-
-  const client = createAdminClient()
-  const { data, error } = await client
-    .from("check_configs")
-    .select("id, model_id, group_name")
-    .eq("group_name", getRequiredGroupName(user))
-
-  if (error) {
-    throw error
-  }
-
-  return (data ?? []) as ScopedConfigReference[]
-}
-
-async function listScopedConfigIds(user: AppUser) {
-  const scopedConfigs = await listScopedConfigReferences(user)
-  return scopedConfigs?.map((item) => item.id) ?? null
-}
+// ─── dashboard ────────────────────────────────────────────────────────────────
 
 export async function getDashboardSummary(user: AppUser): Promise<DashboardSummary> {
-  if (!isAdminUser(user)) {
-    const [configs, scopedConfigIds] = await Promise.all([
-      listConfigs(user),
-      listScopedConfigIds(user),
-    ])
+  const scopeGroup = getScopeGroup(user)
+  const configs = await dbConfigs.listConfigs(scopeGroup)
 
-    const recentErrorCount =
-      scopedConfigIds && scopedConfigIds.length > 0
-        ? await countRows("check_history", (query) =>
-            query.in("config_id", scopedConfigIds).in("status", ["failed", "validation_failed", "error"])
-          )
-        : 0
+  if (!isAdminUser(user)) {
+    const scopedIds = configs.map((c) => c.id)
+    let recentErrorCount = 0
+
+    if (scopedIds.length > 0) {
+      const history = await getRecentCheckHistory(1, scopedIds)
+      // Count entries whose status is a failure status — but getDashboardSummary
+      // originally counted from check_history directly; use availability proxy: just
+      // list recent history with a large per-config limit and filter statuses.
+      const errorHistory = await getRecentCheckHistory(50, scopedIds)
+      recentErrorCount = errorHistory.filter((h) =>
+        h.status === "failed" || h.status === "validation_failed" || h.status === "error"
+      ).length
+      void history // silence unused
+    }
 
     return {
-      modelCount: new Set(configs.map((item) => item.model_id)).size,
+      modelCount: new Set(configs.map((c) => c.model_id)).size,
       configCount: configs.length,
-      enabledConfigCount: configs.filter((item) => Boolean(item.enabled)).length,
-      maintenanceConfigCount: configs.filter((item) => Boolean(item.is_maintenance)).length,
-      templateCount: new Set(configs.map((item) => item.template_id).filter(Boolean)).size,
-      groupCount: new Set(configs.map((item) => item.group_name).filter(Boolean)).size,
+      enabledConfigCount: configs.filter((c) => c.enabled).length,
+      maintenanceConfigCount: configs.filter((c) => c.is_maintenance).length,
+      templateCount: 0, // members don't get template info from config row
+      groupCount: new Set(configs.map((c) => c.group_name).filter(Boolean)).size,
       activeNotificationCount: 0,
       recentErrorCount,
     }
   }
 
-  const [
-    modelCount,
-    configCount,
-    enabledConfigCount,
-    maintenanceConfigCount,
-    templateCount,
-    groupCount,
-    activeNotificationCount,
-    recentErrorCount,
-  ] = await Promise.all([
-    countRows("check_models"),
-    countRows("check_configs"),
-    countRows("check_configs", (query) => query.eq("enabled", true)),
-    countRows("check_configs", (query) => query.eq("is_maintenance", true)),
-    countRows("check_request_templates"),
-    countRows("group_info"),
-    countRows("system_notifications", (query) => query.eq("is_active", true)),
-    countRows("check_history", (query) =>
-      query.in("status", ["failed", "validation_failed", "error"])
-    ),
-  ])
+  // Admin: fetch all counts in parallel
+  const [allModels, allTemplates, allGroups, activeNotifications, recentErrorHistory] =
+    await Promise.all([
+      dbModels.listModels(),
+      dbTemplates.listTemplates(),
+      dbGroups.listGroups(),
+      dbNotifications.listActiveNotifications(),
+      getRecentCheckHistory(50, null),
+    ])
+
+  const recentErrorCount = recentErrorHistory.filter((h) =>
+    h.status === "failed" || h.status === "validation_failed" || h.status === "error"
+  ).length
 
   return {
-    modelCount,
-    configCount,
-    enabledConfigCount,
-    maintenanceConfigCount,
-    templateCount,
-    groupCount,
-    activeNotificationCount,
+    modelCount: allModels.length,
+    configCount: configs.length,
+    enabledConfigCount: configs.filter((c) => c.enabled).length,
+    maintenanceConfigCount: configs.filter((c) => c.is_maintenance).length,
+    templateCount: allTemplates.length,
+    groupCount: allGroups.length,
+    activeNotificationCount: activeNotifications.length,
     recentErrorCount,
   }
 }
 
-export async function listConfigs(user: AppUser) {
-  const client = createAdminClient()
-  const scopedQuery = applyConfigScope(
-    client
-    .from("check_configs")
-    .select(
-      "id, name, type, model_id, endpoint, api_key, enabled, is_maintenance, group_name, created_at, updated_at, check_models(model, template_id, check_request_templates(id, name))"
-    )
-    .order("updated_at", { ascending: false }),
-    user
-  )
-  const { data, error } = await scopedQuery
+// ─── configs ──────────────────────────────────────────────────────────────────
 
-  if (error) {
-    throw error
+export async function listConfigs(user: AppUser): Promise<CheckConfigRecord[]> {
+  const scopeGroup = getScopeGroup(user)
+  const rows = await dbConfigs.listConfigs(scopeGroup)
+  return enrichConfigs(rows)
+}
+
+export async function getConfigById(id: string, user: AppUser): Promise<CheckConfigRecord | null> {
+  const scopeGroup = getScopeGroup(user)
+  const rows = await dbConfigs.listConfigs(scopeGroup)
+  const row = rows.find((r) => r.id === id)
+  if (!row) return null
+  const enriched = await enrichConfigs([row])
+  return enriched[0] ?? null
+}
+
+// ─── models ───────────────────────────────────────────────────────────────────
+
+export async function listModels(user?: AppUser): Promise<CheckModelRecord[]> {
+  const allModels = await dbModels.listModels()
+  const allTemplates = await dbTemplates.listTemplates()
+  const templateMap = new Map(allTemplates.map((t) => [t.id, t]))
+
+  // Build config_count map
+  const allConfigs = await dbConfigs.listConfigs()
+  const countMap = new Map<string, number>()
+  for (const c of allConfigs) {
+    countMap.set(c.model_id, (countMap.get(c.model_id) ?? 0) + 1)
   }
 
-  return ((data ?? []) as Array<
-    Omit<CheckConfigRecord, "model" | "template_id" | "template_name"> & {
-      check_models?:
-        | {
-            model: string
-            template_id: string | null
-            check_request_templates?: { id: string; name: string } | Array<{ id: string; name: string }> | null
-          }
-        | Array<{
-            model: string
-            template_id: string | null
-            check_request_templates?: { id: string; name: string } | Array<{ id: string; name: string }> | null
-          }>
-        | null
+  let filtered = allModels
+
+  if (user && !isAdminUser(user)) {
+    // Scope to models referenced by user's configs
+    const scopeGroup = getRequiredGroupName(user)
+    const scopedConfigs = await dbConfigs.listConfigs(scopeGroup)
+    const scopedModelIds = new Set(scopedConfigs.map((c) => c.model_id))
+    filtered = allModels.filter((m) => scopedModelIds.has(m.id))
+  }
+
+  return filtered.map((m) => {
+    const template = m.template_id ? templateMap.get(m.template_id) : undefined
+    return {
+      id: m.id,
+      type: m.type as CheckModelRecord["type"],
+      model: m.model,
+      template_id: m.template_id ?? null,
+      template_name: template?.name ?? null,
+      created_at: m.created_at,
+      updated_at: m.updated_at,
+      config_count: countMap.get(m.id) ?? 0,
     }
-  >).map((item) => ({
-    ...item,
-    model: Array.isArray(item.check_models)
-      ? (item.check_models[0]?.model ?? "")
-      : (item.check_models?.model ?? ""),
-    template_id: (() => {
-      const model = Array.isArray(item.check_models) ? item.check_models[0] : item.check_models
-      return model?.template_id ?? null
-    })(),
-    template_name: (() => {
-      const model = Array.isArray(item.check_models) ? item.check_models[0] : item.check_models
-      const template = Array.isArray(model?.check_request_templates)
-        ? model.check_request_templates[0]
-        : model?.check_request_templates
-      return template?.name ?? null
-    })(),
-  }))
+  })
 }
 
-export async function getConfigById(id: string, user: AppUser) {
-  const client = createAdminClient()
-  const scopedQuery = applyConfigScope(
-    client
-    .from("check_configs")
-    .select(
-      "id, name, type, model_id, endpoint, api_key, enabled, is_maintenance, group_name, created_at, updated_at, check_models(model, template_id, check_request_templates(id, name))"
-    )
-    .eq("id", id),
-    user
-  )
-  const { data, error } = await scopedQuery.maybeSingle()
+export async function listSelectableModels(): Promise<CheckModelRecord[]> {
+  return listModels()
+}
 
-  if (error) {
-    throw error
-  }
+export async function listModelsByType(type: CheckModelRecord["type"]): Promise<CheckModelRecord[]> {
+  const all = await listModels()
+  return all.filter((m) => m.type === type)
+}
 
-  if (!data) {
-    return null
-  }
+export async function getModelById(id: string): Promise<CheckModelRecord | null> {
+  const model = await dbModels.getModel(id)
+  if (!model) return null
 
-  const typed = data as Omit<CheckConfigRecord, "model" | "template_id" | "template_name"> & {
-    check_models?:
-      | {
-          model: string
-          template_id: string | null
-          check_request_templates?: { id: string; name: string } | Array<{ id: string; name: string }> | null
-        }
-      | Array<{
-          model: string
-          template_id: string | null
-          check_request_templates?: { id: string; name: string } | Array<{ id: string; name: string }> | null
-        }>
-      | null
-  }
+  const allTemplates = await dbTemplates.listTemplates()
+  const templateMap = new Map(allTemplates.map((t) => [t.id, t]))
+  const template = model.template_id ? templateMap.get(model.template_id) : undefined
 
-  const model = Array.isArray(typed.check_models) ? typed.check_models[0] : typed.check_models
-  const template = Array.isArray(model?.check_request_templates)
-    ? model.check_request_templates[0]
-    : model?.check_request_templates
+  const configCount = await dbModels.countConfigsByModel(id)
 
   return {
-    ...typed,
-    model: model?.model ?? "",
-    template_id: model?.template_id ?? null,
+    id: model.id,
+    type: model.type as CheckModelRecord["type"],
+    model: model.model,
+    template_id: model.template_id ?? null,
     template_name: template?.name ?? null,
-  } as CheckConfigRecord
+    created_at: model.created_at,
+    updated_at: model.updated_at,
+    config_count: configCount,
+  }
 }
 
-export async function listModels(user?: AppUser) {
-  const client = createAdminClient()
+// ─── templates ────────────────────────────────────────────────────────────────
 
-  if (user && !isAdminUser(user)) {
-    const scopedConfigs = await listScopedConfigReferences(user)
-
-    if (!scopedConfigs || scopedConfigs.length === 0) {
-      return []
-    }
-
-    const modelIds = Array.from(new Set(scopedConfigs.map((item) => item.model_id)))
-    const { data, error } = await client
-      .from("check_models")
-      .select("*, check_request_templates(name)")
-      .in("id", modelIds)
-      .order("updated_at", { ascending: false })
-
-    if (error) {
-      throw error
-    }
-
-    const countMap = new Map<string, number>()
-    for (const item of scopedConfigs) {
-      const current = countMap.get(item.model_id) ?? 0
-      countMap.set(item.model_id, current + 1)
-    }
-
-    return ((data ?? []) as Array<
-      Omit<CheckModelRecord, "template_name"> & {
-        check_request_templates?: { name: string } | Array<{ name: string }> | null
-      }
-    >).map((item) => ({
-      ...item,
-      template_name: Array.isArray(item.check_request_templates)
-        ? (item.check_request_templates[0]?.name ?? null)
-        : (item.check_request_templates?.name ?? null),
-      config_count: countMap.get(item.id) ?? 0,
-    }))
-  }
-
-  const [{ data, error }, configs] = await Promise.all([
-    client
-      .from("check_models")
-      .select("*, check_request_templates(name)")
-      .order("updated_at", { ascending: false }),
-    client.from("check_configs").select("model_id"),
-  ])
-
-  if (error) {
-    throw error
-  }
-
-  if (configs.error) {
-    throw configs.error
-  }
+export async function listTemplates(user?: AppUser): Promise<CheckRequestTemplateRecord[]> {
+  const allTemplates = await dbTemplates.listTemplates()
+  const allModels = await dbModels.listModels()
 
   const countMap = new Map<string, number>()
-  for (const item of configs.data ?? []) {
-    const current = countMap.get(item.model_id) ?? 0
-    countMap.set(item.model_id, current + 1)
-  }
-
-  return ((data ?? []) as Array<
-    Omit<CheckModelRecord, "template_name"> & {
-      check_request_templates?: { name: string } | Array<{ name: string }> | null
+  for (const m of allModels) {
+    if (m.template_id) {
+      countMap.set(m.template_id, (countMap.get(m.template_id) ?? 0) + 1)
     }
-  >).map((item) => ({
-    ...item,
-    template_name: Array.isArray(item.check_request_templates)
-      ? (item.check_request_templates[0]?.name ?? null)
-      : (item.check_request_templates?.name ?? null),
-    config_count: countMap.get(item.id) ?? 0,
-  }))
-}
-
-export async function listSelectableModels() {
-  const client = createAdminClient()
-  const [{ data, error }, configs] = await Promise.all([
-    client
-      .from("check_models")
-      .select("*, check_request_templates(name)")
-      .order("updated_at", { ascending: false }),
-    client.from("check_configs").select("model_id"),
-  ])
-
-  if (error) {
-    throw error
   }
 
-  if (configs.error) {
-    throw configs.error
-  }
-
-  const countMap = new Map<string, number>()
-  for (const item of configs.data ?? []) {
-    const current = countMap.get(item.model_id) ?? 0
-    countMap.set(item.model_id, current + 1)
-  }
-
-  return ((data ?? []) as Array<
-    Omit<CheckModelRecord, "template_name"> & {
-      check_request_templates?: { name: string } | Array<{ name: string }> | null
-    }
-  >).map((item) => ({
-    ...item,
-    template_name: Array.isArray(item.check_request_templates)
-      ? (item.check_request_templates[0]?.name ?? null)
-      : (item.check_request_templates?.name ?? null),
-    config_count: countMap.get(item.id) ?? 0,
-  }))
-}
-
-export async function listModelsByType(type: CheckModelRecord["type"]) {
-  const client = createAdminClient()
-  const { data, error } = await client
-    .from("check_models")
-    .select("*")
-    .eq("type", type)
-    .order("model", { ascending: true })
-
-  if (error) {
-    throw error
-  }
-
-  return (data ?? []) as CheckModelRecord[]
-}
-
-export async function getModelById(id: string) {
-  const client = createAdminClient()
-  const [{ data, error }, configs] = await Promise.all([
-    client
-      .from("check_models")
-      .select("*, check_request_templates(name)")
-      .eq("id", id)
-      .maybeSingle(),
-    client.from("check_configs").select("id", { count: "exact", head: true }).eq("model_id", id),
-  ])
-
-  if (error) {
-    throw error
-  }
-
-  if (configs.error) {
-    throw configs.error
-  }
-
-  if (!data) {
-    return null
-  }
-
-  return {
-    ...(data as Omit<CheckModelRecord, "template_name"> & {
-      check_request_templates?: { name: string } | Array<{ name: string }> | null
-    }),
-    template_name: Array.isArray(data.check_request_templates)
-      ? (data.check_request_templates[0]?.name ?? null)
-      : (data.check_request_templates?.name ?? null),
-    config_count: configs.count ?? 0,
-  } satisfies CheckModelRecord
-}
-
-export async function listTemplates(user?: AppUser) {
-  const client = createAdminClient()
+  let filtered = allTemplates
 
   if (user && !isAdminUser(user)) {
+    // Scope to templates used by models referenced by user's configs
     const models = await listModels(user)
-    const templateIds = Array.from(
-      new Set(models.map((item) => item.template_id).filter((item): item is string => Boolean(item)))
+    const usedTemplateIds = new Set(
+      models.map((m) => m.template_id).filter((id): id is string => Boolean(id))
     )
-
-    if (templateIds.length === 0) {
-      return []
-    }
-
-    const { data, error } = await client
-      .from("check_request_templates")
-      .select("*")
-      .in("id", templateIds)
-      .order("updated_at", { ascending: false })
-
-    if (error) {
-      throw error
-    }
-
-    const countMap = new Map<string, number>()
-    for (const item of models) {
-      if (!item.template_id) {
-        continue
-      }
-
-      const current = countMap.get(item.template_id) ?? 0
-      countMap.set(item.template_id, current + 1)
-    }
-
-    return ((data ?? []) as CheckRequestTemplateRecord[]).map((item) => ({
-      ...item,
-      model_count: countMap.get(item.id) ?? 0,
-    }))
+    filtered = allTemplates.filter((t) => usedTemplateIds.has(t.id))
   }
 
-  const [{ data, error }, models] = await Promise.all([
-    client
-      .from("check_request_templates")
-      .select("*")
-      .order("updated_at", { ascending: false }),
-    client.from("check_models").select("template_id"),
-  ])
-
-  if (error) {
-    throw error
-  }
-
-  if (models.error) {
-    throw models.error
-  }
-
-  const countMap = new Map<string, number>()
-  for (const item of models.data ?? []) {
-    if (!item.template_id) {
-      continue
-    }
-
-    const current = countMap.get(item.template_id) ?? 0
-    countMap.set(item.template_id, current + 1)
-  }
-
-  return ((data ?? []) as CheckRequestTemplateRecord[]).map((item) => ({
-    ...item,
-    model_count: countMap.get(item.id) ?? 0,
+  return filtered.map((t) => ({
+    id: t.id,
+    name: t.name,
+    type: t.type as CheckRequestTemplateRecord["type"],
+    request_header: (t.request_header ?? null) as CheckRequestTemplateRecord["request_header"],
+    metadata: (t.metadata ?? null) as CheckRequestTemplateRecord["metadata"],
+    created_at: t.created_at,
+    updated_at: t.updated_at,
+    model_count: countMap.get(t.id) ?? 0,
   }))
 }
 
-export async function getTemplateById(id: string) {
-  const client = createAdminClient()
-  const [{ data, error }, models] = await Promise.all([
-    client
-      .from("check_request_templates")
-      .select("*")
-      .eq("id", id)
-      .maybeSingle(),
-    client.from("check_models").select("id", { count: "exact", head: true }).eq("template_id", id),
-  ])
+export async function getTemplateById(id: string): Promise<CheckRequestTemplateRecord | null> {
+  const template = await dbTemplates.getTemplate(id)
+  if (!template) return null
 
-  if (error) {
-    throw error
-  }
-
-  if (models.error) {
-    throw models.error
-  }
-
-  if (!data) {
-    return null
-  }
+  const modelCount = await dbTemplates.countModelsByTemplate(id)
 
   return {
-    ...(data as CheckRequestTemplateRecord),
-    model_count: models.count ?? 0,
-  } satisfies CheckRequestTemplateRecord
+    id: template.id,
+    name: template.name,
+    type: template.type as CheckRequestTemplateRecord["type"],
+    request_header: (template.request_header ?? null) as CheckRequestTemplateRecord["request_header"],
+    metadata: (template.metadata ?? null) as CheckRequestTemplateRecord["metadata"],
+    created_at: template.created_at,
+    updated_at: template.updated_at,
+    model_count: modelCount,
+  }
 }
 
-export async function listGroups() {
-  const client = createAdminClient()
-  const { data, error } = await client
-    .from("group_info")
-    .select("*")
-    .order("updated_at", { ascending: false })
+// ─── groups ───────────────────────────────────────────────────────────────────
 
-  if (error) {
-    throw error
-  }
-
-  return (data ?? []) as GroupInfoRecord[]
-}
-
-export async function listAdminUsers() {
-  const client = createAdminClient()
-  const { data, error } = await client
-    .from("admin_users")
-    .select("*")
-    .order("updated_at", { ascending: false })
-
-  if (error) {
-    throw error
-  }
-
-  return (data ?? []) as AdminDirectoryUserRecord[]
-}
-
-export async function getGroupById(id: string) {
-  const client = createAdminClient()
-  const { data, error } = await client
-    .from("group_info")
-    .select("*")
-    .eq("id", id)
-    .maybeSingle()
-
-  if (error) {
-    throw error
-  }
-
-  return data as GroupInfoRecord | null
-}
-
-export async function listNotifications() {
-  const client = createAdminClient()
-  const { data, error } = await client
-    .from("system_notifications")
-    .select("*")
-    .order("created_at", { ascending: false })
-
-  if (error) {
-    throw error
-  }
-
-  return (data ?? []) as SystemNotificationRecord[]
-}
-
-export async function getNotificationById(id: string) {
-  const client = createAdminClient()
-  const { data, error } = await client
-    .from("system_notifications")
-    .select("*")
-    .eq("id", id)
-    .maybeSingle()
-
-  if (error) {
-    throw error
-  }
-
-  return data as SystemNotificationRecord | null
-}
-
-export async function listRecentHistory(user: AppUser, limit = 120) {
-  const client = createAdminClient()
-  const scopedConfigIds = await listScopedConfigIds(user)
-
-  if (scopedConfigIds && scopedConfigIds.length === 0) {
-    return []
-  }
-
-  let query = client
-    .from("check_history")
-    .select(
-      "id, config_id, status, latency_ms, ping_latency_ms, checked_at, message, created_at, check_configs(id, name, type, model_id, group_name, check_models(model))"
-    )
-    .order("checked_at", { ascending: false })
-    .limit(limit)
-
-  if (scopedConfigIds) {
-    query = query.in("config_id", scopedConfigIds)
-  }
-
-  const { data, error } = await query
-
-  if (error) {
-    throw error
-  }
-
-  return ((data ?? []) as Array<
-    Omit<CheckHistoryRecord, "check_configs"> & {
-      check_configs?:
-        | Array<
-            Pick<CheckConfigRecord, "id" | "name" | "type" | "model_id" | "group_name"> & {
-              check_models?: { model: string } | Array<{ model: string }> | null
-            }
-          >
-        | (Pick<CheckConfigRecord, "id" | "name" | "type" | "model_id" | "group_name"> & {
-            check_models?: { model: string } | Array<{ model: string }> | null
-          })
-        | null
-    }
-  >).map((item) => ({
-    ...item,
-    check_configs: (() => {
-      const config = Array.isArray(item.check_configs)
-        ? (item.check_configs[0] ?? null)
-        : (item.check_configs ?? null)
-
-      if (!config) {
-        return null
-      }
-
-      return {
-        id: config.id,
-        name: config.name,
-        type: config.type,
-        model_id: config.model_id,
-        model: Array.isArray(config.check_models)
-          ? (config.check_models[0]?.model ?? "")
-          : (config.check_models?.model ?? ""),
-        group_name: config.group_name,
-      }
-    })(),
+export async function listGroups(): Promise<GroupInfoRecord[]> {
+  const rows = await dbGroups.listGroups()
+  return rows.map((r) => ({
+    id: r.id,
+    group_name: r.group_name,
+    website_url: r.website_url,
+    tags: r.tags,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
   }))
 }
 
-export async function listAvailabilityStats(user: AppUser) {
-  const client = createAdminClient()
-  const scopedConfigIds = await listScopedConfigIds(user)
+export async function getGroupById(id: string): Promise<GroupInfoRecord | null> {
+  const groups = await dbGroups.listGroups()
+  const row = groups.find((g) => g.id === id)
+  if (!row) return null
+  return {
+    id: row.id,
+    group_name: row.group_name,
+    website_url: row.website_url,
+    tags: row.tags,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  }
+}
 
-  if (scopedConfigIds && scopedConfigIds.length === 0) {
+// ─── admin users ──────────────────────────────────────────────────────────────
+// The SQLite schema has no admin_users table. The app uses single-key login
+// (env ADMIN_LOGIN_KEY) and buildSyntheticAdmin() in lib/admin/auth.ts.
+// We return an empty array — callers (users list page) will render an empty table,
+// which is correct: there are no directory users to manage.
+
+export async function listAdminUsers(): Promise<AdminDirectoryUserRecord[]> {
+  return []
+}
+
+// ─── notifications ────────────────────────────────────────────────────────────
+
+export async function listNotifications(): Promise<SystemNotificationRecord[]> {
+  const rows = await dbNotifications.listNotifications()
+  return rows.map((r) => ({
+    id: r.id,
+    message: r.message,
+    is_active: r.is_active,
+    level: r.level as SystemNotificationRecord["level"],
+    created_at: r.created_at,
+  }))
+}
+
+export async function getNotificationById(id: string): Promise<SystemNotificationRecord | null> {
+  const row = await dbNotifications.getNotification(id)
+  if (!row) return null
+  return {
+    id: row.id,
+    message: row.message,
+    is_active: row.is_active,
+    level: row.level as SystemNotificationRecord["level"],
+    created_at: row.created_at,
+  }
+}
+
+// ─── history ──────────────────────────────────────────────────────────────────
+
+export async function listRecentHistory(user: AppUser, limit = 120): Promise<CheckHistoryRecord[]> {
+  const scopedIds = await listScopedConfigIds(user)
+
+  if (scopedIds !== null && scopedIds.length === 0) {
     return []
   }
 
-  let query = client
-    .from("availability_stats")
-    .select("*")
-    .order("config_id")
+  const rows = await getRecentCheckHistory(limit, scopedIds)
 
-  if (scopedConfigIds) {
-    query = query.in("config_id", scopedConfigIds)
-  }
-
-  const { data, error } = await query
-
-  if (error) {
-    throw error
-  }
-
-  return (data ?? []) as AvailabilityStatRecord[]
+  return rows.map((row, idx) => ({
+    id: idx + 1,
+    config_id: row.config_id,
+    status: row.status as CheckHistoryRecord["status"],
+    latency_ms: row.latency_ms,
+    ping_latency_ms: row.ping_latency_ms,
+    checked_at: row.checked_at,
+    message: row.message,
+    created_at: row.checked_at,
+    check_configs: {
+      id: row.config_id,
+      name: row.name,
+      type: row.type as CheckConfigRecord["type"],
+      model_id: "",
+      model: row.model,
+      group_name: row.group_name,
+    },
+  }))
 }
 
-export async function getPollerLease() {
-  const client = createAdminClient()
-  const { data, error } = await client
-    .from("check_poller_leases")
-    .select("*")
-    .eq("lease_key", "poller")
-    .maybeSingle()
+// ─── availability ─────────────────────────────────────────────────────────────
 
-  if (error) {
-    throw error
+export async function listAvailabilityStats(user: AppUser): Promise<AvailabilityStatRecord[]> {
+  const scopedIds = await listScopedConfigIds(user)
+
+  if (scopedIds !== null && scopedIds.length === 0) {
+    return []
   }
 
-  return data as PollerLeaseRecord | null
+  const rows = await getAvailabilityStats(scopedIds)
+
+  return rows.map((r) => ({
+    config_id: r.config_id,
+    period: r.period,
+    total_checks: r.total_checks,
+    operational_count: r.operational_count,
+    availability_pct: r.availability_pct,
+  }))
 }
+
+// ─── getPollerLease REMOVED ───────────────────────────────────────────────────
+// The lease table was removed in Task 8. Callers (system/page.tsx) have been
+// updated to show a static "进程内单实例运行" note instead.

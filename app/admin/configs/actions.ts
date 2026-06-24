@@ -1,4 +1,4 @@
-﻿"use server"
+"use server"
 
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
@@ -7,7 +7,16 @@ import { requireAppUser } from "@/lib/admin/auth"
 import { requiredString, optionalString, booleanFromForm, parseProviderType, withMessage } from "@/lib/admin/forms"
 import { getRequiredGroupName, isAdminUser } from "@/lib/admin/permissions"
 import { listSelectableModels } from "@/lib/admin/queries"
-import { createAdminClient } from "@/lib/admin/supabase-admin"
+import {
+  listConfigs,
+  getConfig,
+  createConfig,
+  updateConfig,
+  deleteConfig,
+  setConfigsEnabled,
+  deleteHistoryByConfig,
+} from "@/lib/db/configs"
+import { getModel } from "@/lib/db/models"
 import type { AppUser, ProviderType } from "@/lib/admin/types"
 
 type BatchConfigOperation =
@@ -103,71 +112,29 @@ function normalizeGroupName(value: string | null | undefined) {
   return groupName.length > 0 ? groupName : null
 }
 
-function applyScopeToIdQuery<T extends { eq: (column: string, value: unknown) => T }>(
-  query: T,
-  user: AppUser
-) {
+async function getScopedConfig(user: AppUser, id: string) {
   if (isAdminUser(user)) {
-    return query
+    return getConfig(id)
   }
-
-  return query.eq("group_name", getRequiredGroupName(user))
+  const scopeGroup = getRequiredGroupName(user)
+  const row = await getConfig(id)
+  if (!row) return null
+  if (row.group_name !== scopeGroup) return null
+  return row
 }
 
-async function getScopedConfig(
-  user: AppUser,
-  id: string,
-  select = "id, name, type, group_name"
-) {
-  const client = createAdminClient()
-  const scopedQuery = applyScopeToIdQuery(
-    client.from("check_configs").select(select).eq("id", id),
-    user
-  )
-  const { data, error } = await scopedQuery.maybeSingle()
-
-  if (error) {
-    throw error
-  }
-
-  return data
-}
-
-async function getScopedConfigs(
-  user: AppUser,
-  ids: string[],
-  select = "id, name, type, group_name"
-) {
-  const client = createAdminClient()
-  let query = client.from("check_configs").select(select).in("id", ids)
-
-  if (!isAdminUser(user)) {
-    query = query.eq("group_name", getRequiredGroupName(user))
-  }
-
-  const { data, error } = await query
-
-  if (error) {
-    throw error
-  }
-
-  return data ?? []
+async function getScopedConfigs(user: AppUser, ids: string[]) {
+  const scopeGroup = isAdminUser(user) ? null : getRequiredGroupName(user)
+  const rows = await listConfigs(scopeGroup)
+  const idSet = new Set(ids)
+  return rows.filter((r) => idSet.has(r.id))
 }
 
 async function parseConfigPayload(formData: FormData, user: AppUser) {
-  const client = createAdminClient()
   const type = parseProviderType(requiredString(formData, "type", "Provider 类型"))
   const modelId = requiredString(formData, "model_id", "模型")
 
-  const { data: model, error: modelError } = await client
-    .from("check_models")
-    .select("id, type")
-    .eq("id", modelId)
-    .maybeSingle()
-
-  if (modelError) {
-    throw modelError
-  }
+  const model = await getModel(modelId)
 
   if (!model) {
     throw new Error("所选模型不存在")
@@ -206,12 +173,7 @@ export async function createConfigAction(formData: FormData) {
 
   try {
     const payload = await parseConfigPayload(formData, user)
-    const client = createAdminClient()
-    const { error } = await client.from("check_configs").insert(payload)
-
-    if (error) {
-      throw error
-    }
+    await createConfig(payload)
   } catch (error) {
     const message = error instanceof Error ? error.message : "创建配置失败"
     redirect(withSourceMessage(message, sourceId))
@@ -235,12 +197,7 @@ export async function updateConfigAction(formData: FormData) {
     }
 
     const payload = await parseConfigPayload(formData, user)
-    const client = createAdminClient()
-    const { error } = await client.from("check_configs").update(payload).eq("id", id)
-
-    if (error) {
-      throw error
-    }
+    await updateConfig(id, payload)
   } catch (error) {
     const message = error instanceof Error ? error.message : "更新配置失败"
     redirect(withMessage(`/admin/configs/${id}`, "error", message))
@@ -263,12 +220,7 @@ export async function deleteConfigAction(formData: FormData) {
       throw new Error("指定配置不存在，或你没有权限删除它")
     }
 
-    const client = createAdminClient()
-    const { error } = await client.from("check_configs").delete().eq("id", id)
-
-    if (error) {
-      throw error
-    }
+    await deleteConfig(id)
   } catch (error) {
     const message = error instanceof Error ? error.message : "删除配置失败"
     redirect(withMessage(`/admin/configs/${id}`, "error", message))
@@ -286,21 +238,13 @@ export async function clearConfigHistoryAction(formData: FormData) {
   const returnPath = getConfigsReturnPath(formData)
 
   try {
-    const config = (await getScopedConfig(user, id, "id, name")) as unknown as {
-      id: string
-      name: string
-    } | null
+    const config = await getScopedConfig(user, id)
 
     if (!config) {
       throw new Error("指定配置不存在，或你没有权限清理它")
     }
 
-    const client = createAdminClient()
-    const { error } = await client.from("check_history").delete().eq("config_id", id)
-
-    if (error) {
-      throw error
-    }
+    await deleteHistoryByConfig(id)
 
     revalidatePath("/admin")
     revalidatePath("/admin/configs")
@@ -321,12 +265,7 @@ export async function batchConfigAction(formData: FormData) {
   try {
     const ids = getSelectedConfigIds(formData)
     const operation = parseBatchConfigOperation(formData.get("operation"))
-    const client = createAdminClient()
-    const selectedConfigs = (await getScopedConfigs(user, ids, "id, name, type")) as unknown as Array<{
-      id: string
-      name: string
-      type: ProviderType
-    }>
+    const selectedConfigs = await getScopedConfigs(user, ids)
     const existingIds = new Set(selectedConfigs.map((item) => item.id))
 
     if (existingIds.size !== ids.length) {
@@ -335,72 +274,41 @@ export async function batchConfigAction(formData: FormData) {
 
     switch (operation) {
       case "enable": {
-        const { error } = await client.from("check_configs").update({ enabled: true }).in("id", ids)
-
-        if (error) {
-          throw error
-        }
-
+        await setConfigsEnabled(ids, true)
         successMessage = `已启用 ${ids.length} 条配置`
         break
       }
       case "disable": {
-        const { error } = await client.from("check_configs").update({ enabled: false }).in("id", ids)
-
-        if (error) {
-          throw error
-        }
-
+        await setConfigsEnabled(ids, false)
         successMessage = `已停用 ${ids.length} 条配置`
         break
       }
       case "maintenance_on": {
-        const { error } = await client
-          .from("check_configs")
-          .update({ is_maintenance: true })
-          .in("id", ids)
-
-        if (error) {
-          throw error
+        for (const id of ids) {
+          await updateConfig(id, { is_maintenance: true })
         }
-
         successMessage = `已将 ${ids.length} 条配置设为维护中`
         break
       }
       case "maintenance_off": {
-        const { error } = await client
-          .from("check_configs")
-          .update({ is_maintenance: false })
-          .in("id", ids)
-
-        if (error) {
-          throw error
+        for (const id of ids) {
+          await updateConfig(id, { is_maintenance: false })
         }
-
         successMessage = `已取消 ${ids.length} 条配置的维护模式`
         break
       }
       case "replace_model": {
         const targetModelId = requiredString(formData, "target_model_id", "目标模型")
-        const selectedTypes = parseProviderTypeSet(formData.getAll("selected_types").map((item) => item.toString()))
+        const selectedTypes = parseProviderTypeSet(
+          formData.getAll("selected_types").map((item) => item.toString())
+        )
 
         if (selectedTypes.length !== 1) {
           throw new Error("选中的配置包含多个 Provider 类型，请先按类型筛选后再批量换模型")
         }
 
         const selectedType = selectedTypes[0]
-
-        const [{ data: targetModel, error: targetModelError }] = await Promise.all([
-          client
-            .from("check_models")
-            .select("id, type, model")
-            .eq("id", targetModelId)
-            .maybeSingle(),
-        ])
-
-        if (targetModelError) {
-          throw targetModelError
-        }
+        const targetModel = await getModel(targetModelId)
 
         if (!targetModel) {
           throw new Error("目标模型不存在")
@@ -427,15 +335,9 @@ export async function batchConfigAction(formData: FormData) {
           throw new Error("目标模型类型和选中配置类型不一致")
         }
 
-        const { error } = await client
-          .from("check_configs")
-          .update({ model_id: targetModelId })
-          .in("id", ids)
-
-        if (error) {
-          throw error
+        for (const id of ids) {
+          await updateConfig(id, { model_id: targetModelId })
         }
-
         successMessage = `已将 ${ids.length} 条配置切换到模型「${targetModel.model}」`
         break
       }
@@ -446,15 +348,9 @@ export async function batchConfigAction(formData: FormData) {
           throw new Error("API Key 长度不能超过 512 个字符")
         }
 
-        const { error } = await client
-          .from("check_configs")
-          .update({ api_key: targetApiKey })
-          .in("id", ids)
-
-        if (error) {
-          throw error
+        for (const id of ids) {
+          await updateConfig(id, { api_key: targetApiKey })
         }
-
         successMessage = `已替换 ${ids.length} 条配置的密钥`
         break
       }
@@ -465,15 +361,9 @@ export async function batchConfigAction(formData: FormData) {
           throw new Error("API 地址长度不能超过 2048 个字符")
         }
 
-        const { error } = await client
-          .from("check_configs")
-          .update({ endpoint: targetEndpoint })
-          .in("id", ids)
-
-        if (error) {
-          throw error
+        for (const id of ids) {
+          await updateConfig(id, { endpoint: targetEndpoint })
         }
-
         successMessage = `已替换 ${ids.length} 条配置的地址`
         break
       }
@@ -484,35 +374,23 @@ export async function batchConfigAction(formData: FormData) {
           throw new Error("名称长度不能超过 255 个字符")
         }
 
-        const { error } = await client
-          .from("check_configs")
-          .update({ name: targetName })
-          .in("id", ids)
-
-        if (error) {
-          throw error
+        for (const id of ids) {
+          await updateConfig(id, { name: targetName })
         }
-
         successMessage = `已替换 ${ids.length} 条配置的名称`
         break
       }
       case "clear_history": {
-        const { error } = await client.from("check_history").delete().in("config_id", ids)
-
-        if (error) {
-          throw error
+        for (const id of ids) {
+          await deleteHistoryByConfig(id)
         }
-
         successMessage = `已清理 ${ids.length} 条配置的请求历史`
         break
       }
       case "delete": {
-        const { error } = await client.from("check_configs").delete().in("id", ids)
-
-        if (error) {
-          throw error
+        for (const id of ids) {
+          await deleteConfig(id)
         }
-
         successMessage = `已删除 ${ids.length} 条配置`
         break
       }
