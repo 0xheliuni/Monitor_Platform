@@ -36,6 +36,18 @@ function base64UrlEncode(buffer: ArrayBuffer): string {
     .replace(/=+$/, "");
 }
 
+// Constant-time string comparison (Web Crypto has no built-in equivalent of
+// node:crypto timingSafeEqual). Compares every character regardless of where
+// the first mismatch occurs, so total time does not depend on match position.
+function timingSafeStringEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i++) {
+    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
+
 async function verifySessionTokenEdge(token?: string | null): Promise<boolean> {
   if (!token) return false;
 
@@ -64,10 +76,14 @@ async function verifySessionTokenEdge(token?: string | null): Promise<boolean> {
 
     const expected = base64UrlEncode(mac);
 
-    // Constant-time comparison via Web Crypto isn't built-in, use length check + XOR
-    if (signature.length !== expected.length) return false;
+    // Verify the signature (constant-time) BEFORE touching the payload, so the
+    // decode/parse work below never runs for a forged token and adds no
+    // position-dependent timing to the comparison.
+    if (!timingSafeStringEqual(signature, expected)) {
+      return false;
+    }
 
-    // Verify payload is parseable with required fields
+    // Signature is valid — confirm the payload is well-formed.
     const payloadBytes = base64UrlDecode(encoded);
     const payload = JSON.parse(new TextDecoder().decode(payloadBytes)) as {
       sub?: unknown;
@@ -78,7 +94,7 @@ async function verifySessionTokenEdge(token?: string | null): Promise<boolean> {
       return false;
     }
 
-    return signature === expected;
+    return true;
   } catch {
     return false;
   }
