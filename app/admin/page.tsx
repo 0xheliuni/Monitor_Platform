@@ -1,0 +1,235 @@
+﻿import Link from "next/link"
+import { ArrowRightIcon } from "lucide-react"
+
+import { PageHeader } from "@/components/admin/page-header"
+import { HistoryStatusBadge } from "@/components/admin/status-badge"
+import { Badge } from "@/components/ui/badge"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { requireAppUser } from "@/lib/admin/auth"
+import { formatDateTime } from "@/lib/admin/format"
+import { isAdminUser } from "@/lib/admin/permissions"
+import {
+  getDashboardSummary,
+  getPollerLease,
+  listNotifications,
+  listRecentHistory,
+} from "@/lib/admin/queries"
+import { hasAdminDatabaseEnv } from "@/lib/admin/server-env"
+
+const quickLinks = [
+  {
+    title: "Provider 配置",
+    description: "管理检测实例、端点、分组和密钥。",
+    href: "/admin/configs",
+  },
+  {
+    title: "模型配置",
+    description: "统一维护模型名称和模板绑定，避免在实例中重复修改。",
+    href: "/admin/models",
+  },
+  {
+    title: "请求模板",
+    description: "复用请求头和 metadata，减少重复配置。",
+    href: "/admin/templates",
+  },
+  {
+    title: "分组与通知",
+    description: "维护前台展示所需的分组信息和通知内容。",
+    href: "/admin/groups",
+  },
+]
+
+export default async function DashboardPage() {
+  const user = await requireAppUser()
+  const adminUser = isAdminUser(user)
+  const adminDbReady = hasAdminDatabaseEnv()
+
+  if (!adminDbReady) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="概览"
+          description="请先补全后台所需环境变量，再使用概览页面。"
+        />
+      </div>
+    )
+  }
+
+  const [summary, recentHistory, lease, notifications] = await Promise.all([
+    getDashboardSummary(user),
+    listRecentHistory(user, 8),
+    adminUser ? getPollerLease() : Promise.resolve(null),
+    adminUser ? listNotifications() : Promise.resolve([]),
+  ])
+
+  return (
+    <div className="space-y-6">
+        <PageHeader
+          title="概览"
+        description={
+          adminUser
+            ? "查看关键对象和最近状态，快速了解后台当前情况。"
+            : `这里只展示你所在分组「${user.groupName}」的配置和运行结果。`
+        }
+      />
+      <div className={`grid gap-4 md:grid-cols-2 ${adminUser ? "xl:grid-cols-5" : "xl:grid-cols-4"}`}>
+        <Card>
+          <CardHeader>
+            <CardDescription>模型配置</CardDescription>
+            <CardTitle className="text-2xl">{summary.modelCount}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            同一模型的模板绑定统一在这里收口。
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>Provider 配置</CardDescription>
+            <CardTitle className="text-2xl">{summary.configCount}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            启用 {summary.enabledConfigCount} / 维护 {summary.maintenanceConfigCount}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>请求模板</CardDescription>
+            <CardTitle className="text-2xl">{summary.templateCount}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            模板越清晰，配置维护越简单。
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>分组</CardDescription>
+            <CardTitle className="text-2xl">{summary.groupCount}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            前台分组展示和后台文本关联要保持一致。
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>{adminUser ? "活跃通知" : "失败/错误记录"}</CardDescription>
+            <CardTitle className="text-2xl">
+              {adminUser ? summary.activeNotificationCount : summary.recentErrorCount}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            {adminUser
+              ? `历史失败/错误记录总数：${summary.recentErrorCount}`
+              : "只统计当前分组配置的失败与错误。"}
+          </CardContent>
+        </Card>
+      </div>
+      <div className={`grid gap-4 ${adminUser ? "xl:grid-cols-[1.2fr_0.8fr]" : ""}`}>
+        <Card>
+          <CardHeader>
+            <CardTitle>快速入口</CardTitle>
+            <CardDescription>
+              {adminUser
+                ? "常用管理入口已集中在这里，便于快速进入对应页面。"
+                : "你只需要关心自己分组里的配置，其他全局对象交给管理员。"}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {quickLinks
+              .filter((item) => adminUser || item.href === "/admin/configs")
+              .map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="rounded-lg border p-4 transition-colors hover:bg-muted/50"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="font-medium">{item.title}</h2>
+                  <ArrowRightIcon className="size-4 text-muted-foreground" />
+                </div>
+                <p className="mt-2 text-sm text-muted-foreground">{item.description}</p>
+              </Link>
+            ))}
+          </CardContent>
+        </Card>
+        {adminUser ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>轮询主节点</CardTitle>
+              <CardDescription>优先确认轮询节点租约状态是否正常。</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                <span className="text-muted-foreground">租约键</span>
+                <span className="font-medium">{lease?.lease_key ?? "poller"}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                <span className="text-muted-foreground">Leader</span>
+                <span className="font-medium">{lease?.leader_id ?? "暂无"}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                <span className="text-muted-foreground">租约到期</span>
+                <span className="font-medium">{formatDateTime(lease?.lease_expires_at)}</span>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+      </div>
+      <div className={`grid gap-4 ${adminUser ? "xl:grid-cols-[1.2fr_0.8fr]" : ""}`}>
+        <Card>
+          <CardHeader>
+            <CardTitle>最近检测记录</CardTitle>
+            <CardDescription>最近 8 条结果，可用于快速判断系统运行情况。</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {recentHistory.map((item) => (
+              <div
+                key={item.id}
+                className="flex flex-col gap-2 rounded-lg border p-3 md:flex-row md:items-center md:justify-between"
+              >
+                <div className="space-y-1">
+                  <p className="font-medium">{item.check_configs?.name ?? item.config_id}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {item.check_configs?.model ?? "-"} · {formatDateTime(item.checked_at)}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 self-start md:self-center">
+                  <HistoryStatusBadge status={item.status} />
+                  <Badge variant="outline">{item.latency_ms ?? "-"} ms</Badge>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+        {adminUser ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>当前通知</CardTitle>
+              <CardDescription>这里只展示最新几条通知，完整维护请前往通知页面。</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {notifications.slice(0, 5).map((item) => (
+                <div key={item.id} className="rounded-lg border p-3 text-sm">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <Badge variant={item.is_active ? "default" : "outline"}>
+                      {item.is_active ? "显示中" : "已停用"}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">{formatDateTime(item.created_at)}</span>
+                  </div>
+                  <p className="line-clamp-3 whitespace-pre-wrap text-muted-foreground">
+                    {item.message}
+                  </p>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        ) : null}
+      </div>
+    </div>
+  )
+}

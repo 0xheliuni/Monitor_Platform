@@ -1,48 +1,52 @@
-import * as React from "react";
-import {cva, type VariantProps} from "class-variance-authority";
+"use client"
 
-import {cn} from "@/lib/utils";
+import * as React from "react"
+import { Button as ButtonPrimitive } from "@base-ui/react/button"
+import { type VariantProps } from "class-variance-authority"
 
-const buttonVariants = cva(
-  "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
-  {
-    variants: {
-      variant: {
-        default: "bg-primary text-primary-foreground shadow hover:bg-primary/90",
-        secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        outline:
-          "border border-input bg-background text-foreground hover:bg-muted hover:text-foreground",
-        ghost: "hover:bg-muted hover:text-foreground",
-      },
-      size: {
-        default: "h-10 px-4 py-2",
-        sm: "h-9 rounded-md px-3",
-        lg: "h-11 rounded-md px-8",
-        icon: "h-10 w-10",
-      },
-    },
-    defaultVariants: {
-      variant: "default",
-      size: "default",
-    },
+import { cn } from "@/lib/utils"
+import { buttonVariants } from "@/components/ui/button-variants"
+
+function Button({
+  className,
+  variant = "default",
+  size = "default",
+  asChild = false,
+  children,
+  render,
+  nativeButton,
+  ...props
+}: ButtonPrimitive.Props &
+  VariantProps<typeof buttonVariants> & {
+    asChild?: boolean
+  }) {
+  const mergedClassName = cn(buttonVariants({ variant, size, className }))
+  const resolvedNativeButton =
+    nativeButton ??
+    (render
+      ? React.isValidElement(render) && render.type === "button"
+      : true)
+
+  if (asChild && React.isValidElement(children)) {
+    const child = children as React.ReactElement<{ className?: string }>
+
+    return React.cloneElement(child, {
+      ...(props as object),
+      className: cn(mergedClassName, child.props.className),
+    })
   }
-);
 
-export interface ButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {}
+  return (
+    <ButtonPrimitive
+      data-slot="button"
+      className={mergedClassName}
+      render={render}
+      nativeButton={resolvedNativeButton}
+      {...props}
+    >
+      {children}
+    </ButtonPrimitive>
+  )
+}
 
-const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, ...props }, ref) => {
-    return (
-      <button
-        className={cn(buttonVariants({ variant, size, className }))}
-        ref={ref}
-        {...props}
-      />
-    );
-  }
-);
-Button.displayName = "Button";
-
-export { Button, buttonVariants };
+export { Button, buttonVariants }
