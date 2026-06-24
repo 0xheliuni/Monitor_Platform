@@ -71,5 +71,10 @@ describe("history", () => {
     const rows = await getCheckHistoryByTime(3600_000, ["c1"], 10);
     expect(rows.length).toBeLessThanOrEqual(12);
     expect(rows.length).toBeGreaterThan(1);
+
+    // Assert first and last inserted records are preserved
+    const sorted = [...recs].sort((a, b) => a.checked_at.localeCompare(b.checked_at));
+    expect(rows.some(r => r.checked_at === sorted[0].checked_at)).toBe(true);
+    expect(rows.some(r => r.checked_at === sorted[sorted.length - 1].checked_at)).toBe(true);
   });
 });

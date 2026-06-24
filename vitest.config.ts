@@ -9,7 +9,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": resolve(__dirname, "."),
-      "server-only": resolve(__dirname, "./lib/server-only.ts"),
+      "server-only": resolve(__dirname, "./tests/stubs/server-only.ts"),
     },
   },
 });
