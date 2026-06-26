@@ -4,7 +4,7 @@ import Link from "next/link"
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react"
 import { CopyIcon, EraserIcon, GlobeIcon, KeyRoundIcon, PencilIcon, ShuffleIcon } from "lucide-react"
 
-import { batchConfigAction, clearConfigHistoryAction } from "@/app/admin/configs/actions"
+import { batchConfigAction, clearConfigHistoryAction } from "@/app/admin/(protected)/configs/actions"
 import { BooleanBadge, ProviderBadge } from "@/components/admin/status-badge"
 import { Button } from "@/components/ui/button"
 import {

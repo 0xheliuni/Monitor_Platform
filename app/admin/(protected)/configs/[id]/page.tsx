@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { notFound } from "next/navigation"
 
-import { deleteConfigAction, updateConfigAction } from "@/app/admin/configs/actions"
+import { deleteConfigAction, updateConfigAction } from "@/app/admin/(protected)/configs/actions"
 import { ConfigModelFields } from "@/components/admin/config-model-fields"
 import { Notice } from "@/components/admin/notice"
 import { PageHeader } from "@/components/admin/page-header"

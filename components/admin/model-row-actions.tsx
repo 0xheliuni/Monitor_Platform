@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 
-import { deleteModelAction } from "@/app/admin/models/actions"
+import { deleteModelAction } from "@/app/admin/(protected)/models/actions"
 import {
   AlertDialog,
   AlertDialogAction,

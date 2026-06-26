@@ -1,6 +1,6 @@
 ﻿import Link from "next/link"
 
-import { createModelAction } from "@/app/admin/models/actions"
+import { createModelAction } from "@/app/admin/(protected)/models/actions"
 import { ModelTemplateFields } from "@/components/admin/model-template-fields"
 import { Notice } from "@/components/admin/notice"
 import { PageHeader } from "@/components/admin/page-header"

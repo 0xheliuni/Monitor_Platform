@@ -1,6 +1,6 @@
 ﻿import Link from "next/link"
 
-import { createTemplateAction } from "@/app/admin/templates/actions"
+import { createTemplateAction } from "@/app/admin/(protected)/templates/actions"
 import { Notice } from "@/components/admin/notice"
 import { PageHeader } from "@/components/admin/page-header"
 import { Button } from "@/components/ui/button"

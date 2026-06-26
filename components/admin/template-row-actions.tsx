@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 
-import { deleteTemplateAction } from "@/app/admin/templates/actions"
+import { deleteTemplateAction } from "@/app/admin/(protected)/templates/actions"
 import {
   AlertDialog,
   AlertDialogAction,

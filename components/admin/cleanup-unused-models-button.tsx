@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import { cleanupUnusedModelsAction } from "@/app/admin/models/actions"
+import { cleanupUnusedModelsAction } from "@/app/admin/(protected)/models/actions"
 import {
   AlertDialog,
   AlertDialogAction,

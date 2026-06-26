@@ -1,6 +1,6 @@
 ﻿import Link from "next/link"
 
-import { toggleNotificationActiveAction } from "@/app/admin/notifications/actions"
+import { toggleNotificationActiveAction } from "@/app/admin/(protected)/notifications/actions"
 import { Notice } from "@/components/admin/notice"
 import { MarkdownPreview } from "@/components/admin/markdown-preview"
 import { PageHeader } from "@/components/admin/page-header"

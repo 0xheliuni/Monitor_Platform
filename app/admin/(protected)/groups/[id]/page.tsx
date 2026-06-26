@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { notFound } from "next/navigation"
 
-import { deleteGroupAction, updateGroupAction } from "@/app/admin/groups/actions"
+import { deleteGroupAction, updateGroupAction } from "@/app/admin/(protected)/groups/actions"
 import { Notice } from "@/components/admin/notice"
 import { PageHeader } from "@/components/admin/page-header"
 import { Button } from "@/components/ui/button"

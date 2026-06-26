@@ -11,7 +11,7 @@ import { nativeSelectClassName } from "@/lib/admin/forms"
 import { getConfigById, listGroups, listSelectableModels } from "@/lib/admin/queries"
 import { isAdminUser } from "@/lib/admin/permissions"
 import { hasAdminDatabaseEnv } from "@/lib/admin/server-env"
-import { createConfigAction } from "@/app/admin/configs/actions"
+import { createConfigAction } from "@/app/admin/(protected)/configs/actions"
 
 function getParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value

@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { notFound } from "next/navigation"
 
-import { deleteModelAction, updateModelAction } from "@/app/admin/models/actions"
+import { deleteModelAction, updateModelAction } from "@/app/admin/(protected)/models/actions"
 import { ModelTemplateFields } from "@/components/admin/model-template-fields"
 import { Notice } from "@/components/admin/notice"
 import { PageHeader } from "@/components/admin/page-header"

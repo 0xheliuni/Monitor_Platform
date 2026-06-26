@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import { cleanupUnusedTemplatesAction } from "@/app/admin/templates/actions"
+import { cleanupUnusedTemplatesAction } from "@/app/admin/(protected)/templates/actions"
 import {
   AlertDialog,
   AlertDialogAction,

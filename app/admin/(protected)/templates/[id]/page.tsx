@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { notFound } from "next/navigation"
 
-import { deleteTemplateAction, updateTemplateAction } from "@/app/admin/templates/actions"
+import { deleteTemplateAction, updateTemplateAction } from "@/app/admin/(protected)/templates/actions"
 import { Notice } from "@/components/admin/notice"
 import { PageHeader } from "@/components/admin/page-header"
 import { Button } from "@/components/ui/button"
