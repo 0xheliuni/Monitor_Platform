@@ -54,4 +54,25 @@ describe("feishu-card", () => {
     };
     await expect(sendFeishu(webhook, { msg_type: "interactive", card: {} })).rejects.toThrow();
   });
+
+  it("signFeishu known-good: 时间戳在前、secret 在后的 HMAC 密钥产出正确值", () => {
+    // key = "1700000000\nmysecret", message = ""
+    expect(signFeishu("mysecret", 1700000000)).toBe("Jp33/xXhCipDEpjyHvEyc7mRSyXWHbNz6J8+C3qQKNo=");
+  });
+
+  it("sendFeishu 有 secret 时 POST body 包含 timestamp 和 sign", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ code: 0 }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const webhook: FeishuWebhookRow = {
+      id: "w2", name: "W2", webhook_url: "https://open.feishu.cn/hook/y", secret: "mysecret",
+      group_name: null, created_at: "", updated_at: "",
+    };
+    await sendFeishu(webhook, { msg_type: "interactive", card: {} });
+    const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(sentBody).toHaveProperty("timestamp");
+    expect(sentBody).toHaveProperty("sign");
+    expect(sentBody.sign).toBe(signFeishu("mysecret", Number(sentBody.timestamp)));
+  });
 });
