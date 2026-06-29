@@ -137,7 +137,7 @@ metric_samples (
   target_id TEXT NOT NULL,             -- 冗余，便于按目标查询
   metric TEXT NOT NULL,                -- 'ttft_ms'|'ping_ms'|'reachable'
                                        -- |'usage_quota'|'usage_tokens'|'request_count'
-                                       -- |'error_count'|'channel_balance'|'cache_hit_rate'
+                                       -- |'error_count'|'channel_balance'|'cache_entries'
   dim_model TEXT,                      -- 维度：模型名（可空）
   dim_user TEXT,                       -- 维度：用户名（可空）
   dim_channel TEXT,                    -- 维度：渠道 id/名（可空）
@@ -216,7 +216,7 @@ New-Api-User: <admin_user_id>
 | `newapi_usage` | `GET /api/data?start_timestamp=&end_timestamp=` → `QuotaData[]` | 每 (model,user)：`usage_quota`/`usage_tokens`/`request_count`（dim_model/dim_user） | self |
 | `newapi_errors` | `GET /api/log?type=5&start_timestamp=&end_timestamp=&p=&page_size=` | `error_count`（按 channel 聚合，dim_channel），meta 存错误摘要 | self |
 | `newapi_balance` | `GET /api/channel/`（含余额字段）；可选触发 `GET /api/channel/update_balance/:id` | `channel_balance`（dim_channel） | self |
-| `newapi_cache` | `GET /api/option/channel_affinity_cache`（需 root） | `cache_hit_rate` 等 | self(root) |
+| `newapi_cache` | `GET /api/option/channel_affinity_cache`（需 root） | `cache_entries`（缓存占用条目数，非命中率） | self(root) |
 | `active_probe` | 不调管理接口，用 `probe_api_key` 向 `base_url` 发流式请求，复用 `lib/providers/` 首 token 计时 + 数学挑战 | `ttft_ms`/`ping_ms`/`reachable`（dim_model） | self & supplier |
 
 **关键设计决策**：
@@ -362,4 +362,4 @@ lib/
 
 - `/api/channel/` 返回的渠道余额字段名（编码前核实）。
 - newapi 各实例对外是否均为标准 `/v1/chat/completions`（影响 active_probe 默认格式）。
-- 缓存统计 `/api/option/channel_affinity_cache` 的返回结构（编码前核实，决定 `cache_hit_rate` 的提取方式）。
+- 缓存统计 `/api/option/channel_affinity_cache` 的返回结构（**已核实**：返回 `{Enabled,Total,Unknown,ByRuleName}`，为缓存占用条目数而非命中率；指标名定为 `cache_entries`，value=Total）。
