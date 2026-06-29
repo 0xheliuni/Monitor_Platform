@@ -22,16 +22,16 @@ export async function runMonitorOnce(
   let sampleCount = 0;
   let ran = 0;
 
-  await Promise.all(
+  await Promise.allSettled(
     tasks.map((task) =>
       limit(async () => {
         const next = new Date(Date.parse(now) + task.interval_seconds * 1000).toISOString();
-        const target = await getTarget(task.target_id);
-        if (!target || !target.enabled) {
-          await recordTaskRun(task.id, "skipped", "目标不存在或已禁用", next);
-          return;
-        }
         try {
+          const target = await getTarget(task.target_id);
+          if (!target || !target.enabled) {
+            await recordTaskRun(task.id, "skipped", "目标不存在或已禁用", next);
+            return;
+          }
           const samples = await runCollector(target, task);
           await insertSamples(samples);
           sampleCount += samples.length;
