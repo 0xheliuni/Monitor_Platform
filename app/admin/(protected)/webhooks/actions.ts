@@ -27,12 +27,15 @@ export async function createWebhookAction(formData: FormData): Promise<void> {
 
 export async function updateWebhookAction(formData: FormData): Promise<void> {
   await ensureAdmin();
-  await updateWebhook(str(formData, "id"), {
+  const patch: Record<string, unknown> = {
     name: str(formData, "name"),
     webhook_url: str(formData, "webhook_url"),
-    secret: optStr(formData, "secret"),
     group_name: optStr(formData, "group_name"),
-  });
+  };
+  // 仅当用户填写了新值时才覆盖 secret（留空表示不修改，避免清空已有签名密钥）
+  const newSecret = optStr(formData, "secret");
+  if (newSecret) patch.secret = newSecret;
+  await updateWebhook(str(formData, "id"), patch as never);
   revalidatePath("/admin/webhooks");
   redirect("/admin/webhooks");
 }
