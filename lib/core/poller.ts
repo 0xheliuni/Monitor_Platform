@@ -10,6 +10,7 @@ import {runProviderChecks} from "../providers";
 import {getPollingIntervalMs} from "./polling-config";
 import {getLastPingStartedAt, getPollerTimer, setLastPingStartedAt, setPollerTimer,} from "./global-state";
 import {startOfficialStatusPoller} from "./official-status-poller";
+import {runMonitorOnce} from "./monitor-runner";
 import type {CheckResult, HealthStatus} from "../types";
 
 const POLL_INTERVAL_MS = getPollingIntervalMs();
@@ -114,6 +115,17 @@ async function tick() {
     const results = await runProviderChecks(configs);
     await historySnapshotStore.append(results);
     logFailedResultsByGroup(results);
+    try {
+      const monitorResult = await runMonitorOnce();
+      if (monitorResult.ran > 0 || monitorResult.fired > 0 || monitorResult.resolved > 0) {
+        console.log(
+          `[check-cx] newapi 监控：执行 ${monitorResult.ran} 任务，写入 ${monitorResult.samples} 样本，` +
+          `告警 firing=${monitorResult.fired} resolved=${monitorResult.resolved}`
+        );
+      }
+    } catch (error) {
+      console.error("[check-cx] newapi 监控执行失败", error);
+    }
   } catch (error) {
     console.error("[check-cx] 轮询检测失败", error);
   } finally {
