@@ -43,6 +43,26 @@ const quickLinks = [
     description: "维护前台展示所需的分组信息和通知内容。",
     href: "/admin/groups",
   },
+  {
+    title: "监控目标",
+    description: "管理被监控的 newapi 实例。",
+    href: "/admin/targets",
+  },
+  {
+    title: "监控任务",
+    description: "配置采集任务与周期。",
+    href: "/admin/monitor-tasks",
+  },
+  {
+    title: "告警规则",
+    description: "阈值规则与飞书路由。",
+    href: "/admin/alerts",
+  },
+  {
+    title: "飞书 Webhook",
+    description: "告警通知机器人。",
+    href: "/admin/webhooks",
+  },
 ]
 
 export default async function DashboardPage() {

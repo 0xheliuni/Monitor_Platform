@@ -1,0 +1,127 @@
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { buildAlertCard, signFeishu, sendFeishu } from "@/lib/alerting/feishu-card";
+import type { FeishuWebhookRow } from "@/lib/types/monitor";
+
+afterEach(() => vi.restoreAllMocks());
+
+describe("feishu-card", () => {
+  it("firing+critical 卡片为红色并含关键字段", () => {
+    const card = JSON.stringify(buildAlertCard({
+      state: "firing", severity: "critical", ruleName: "错误激增", targetName: "Prod A",
+      metric: "error_count", currentValue: 42, comparator: ">", threshold: 20,
+      windowSeconds: 300, firstSeenAt: "2026-06-28T00:00:00.000Z",
+    }));
+    expect(card).toContain("red");
+    expect(card).toContain("错误激增");
+    expect(card).toContain("Prod A");
+    expect(card).toContain("42");
+  });
+
+  it("resolved 卡片为绿色", () => {
+    const card = JSON.stringify(buildAlertCard({
+      state: "resolved", severity: "warning", ruleName: "R", targetName: "T",
+      metric: "ttft_ms", currentValue: 100, comparator: ">", threshold: 6000,
+      windowSeconds: 300, firstSeenAt: null,
+    }));
+    expect(card).toContain("green");
+  });
+
+  it("飞书签名稳定可复现", () => {
+    const a = signFeishu("mysecret", 1700000000);
+    const b = signFeishu("mysecret", 1700000000);
+    expect(a).toBe(b);
+    expect(a.length).toBeGreaterThan(0);
+  });
+
+  it("sendFeishu 首次失败后重试成功", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("fail", { status: 500 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ code: 0 }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const webhook: FeishuWebhookRow = {
+      id: "w1", name: "W", webhook_url: "https://open.feishu.cn/hook/x", secret: null,
+      group_name: null, created_at: "", updated_at: "",
+    };
+    await sendFeishu(webhook, { msg_type: "interactive", card: {} });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("sendFeishu 两次都失败则抛错", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("fail", { status: 500 })));
+    const webhook: FeishuWebhookRow = {
+      id: "w1", name: "W", webhook_url: "https://open.feishu.cn/hook/x", secret: null,
+      group_name: null, created_at: "", updated_at: "",
+    };
+    await expect(sendFeishu(webhook, { msg_type: "interactive", card: {} })).rejects.toThrow();
+  });
+
+  it("signFeishu known-good: 时间戳在前、secret 在后的 HMAC 密钥产出正确值", () => {
+    // key = "1700000000\nmysecret", message = ""
+    expect(signFeishu("mysecret", 1700000000)).toBe("Jp33/xXhCipDEpjyHvEyc7mRSyXWHbNz6J8+C3qQKNo=");
+  });
+
+  it("sendFeishu 有 secret 时 POST body 包含 timestamp 和 sign", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ code: 0 }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const webhook: FeishuWebhookRow = {
+      id: "w2", name: "W2", webhook_url: "https://open.feishu.cn/hook/y", secret: "mysecret",
+      group_name: null, created_at: "", updated_at: "",
+    };
+    await sendFeishu(webhook, { msg_type: "interactive", card: {} });
+    const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(sentBody).toHaveProperty("timestamp");
+    expect(sentBody).toHaveProperty("sign");
+    expect(sentBody.sign).toBe(signFeishu("mysecret", Number(sentBody.timestamp)));
+  });
+
+  // NEW: Feishu logical failure tests (HTTP 200 but nonzero code)
+
+  it("sendFeishu 两次均返回 200+{code:19021} 则抛错（重试两次）", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 19021, msg: "sign match fail" }), { status: 200 })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 19021, msg: "sign match fail" }), { status: 200 })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const webhook: FeishuWebhookRow = {
+      id: "w3", name: "W3", webhook_url: "https://open.feishu.cn/hook/z", secret: null,
+      group_name: null, created_at: "", updated_at: "",
+    };
+    await expect(sendFeishu(webhook, { msg_type: "interactive", card: {} })).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("sendFeishu 首次 200+{code:19021}、第二次 200+{code:0} 则重试后成功", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 19021, msg: "sign match fail" }), { status: 200 })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 0, msg: "success" }), { status: 200 })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const webhook: FeishuWebhookRow = {
+      id: "w4", name: "W4", webhook_url: "https://open.feishu.cn/hook/q", secret: null,
+      group_name: null, created_at: "", updated_at: "",
+    };
+    await expect(sendFeishu(webhook, { msg_type: "interactive", card: {} })).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("sendFeishu 200+{code:0,msg:'success'} 视为成功，fetch 仅调用一次", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ code: 0, msg: "success" }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const webhook: FeishuWebhookRow = {
+      id: "w5", name: "W5", webhook_url: "https://open.feishu.cn/hook/r", secret: null,
+      group_name: null, created_at: "", updated_at: "",
+    };
+    await expect(sendFeishu(webhook, { msg_type: "interactive", card: {} })).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});

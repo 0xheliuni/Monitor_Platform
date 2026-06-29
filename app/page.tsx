@@ -1,5 +1,6 @@
 import {DashboardBootstrap} from "@/components/dashboard-bootstrap";
 import {ClientYear} from "@/components/client-time";
+import { TargetsSection } from "@/components/monitor/targets-section";
 import packageJson from "@/package.json";
 
 const ESTIMATED_VERSION = `v${packageJson.version}`;
@@ -9,6 +10,7 @@ export default function Home() {
     <div className="py-8 md:py-16">
       <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-3 sm:gap-8 sm:px-6 lg:px-12">
         <DashboardBootstrap />
+        <TargetsSection />
       </main>
       
       <footer className="mt-16 border-t border-border/40">
