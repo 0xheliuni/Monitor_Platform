@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { querySeries } from "@/lib/db/samples";
+import { toPublicSample } from "@/lib/core/monitor-dashboard";
 import type { MetricName } from "@/lib/types/monitor";
 
 export const revalidate = 0;
@@ -15,5 +16,5 @@ export async function GET(request: Request) {
   const to = searchParams.get("to") ?? new Date().toISOString();
   const from = searchParams.get("from") ?? new Date(Date.now() - 24 * 3600_000).toISOString();
   const series = await querySeries(target, metric, from, to);
-  return NextResponse.json(series, { headers: { "Cache-Control": "public, no-cache" } });
+  return NextResponse.json(series.map(toPublicSample), { headers: { "Cache-Control": "public, no-cache" } });
 }
