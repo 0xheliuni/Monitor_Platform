@@ -287,6 +287,44 @@ system_notifications (
 - **历史清理**: `lib/db/history.ts` 使用 SQL window 函数定位超出保留条数的记录后 DELETE，替代原 Postgres RPC
 - **类型校验**: 写入 `check_models` / `check_configs` 时应用层校验类型一致性，不匹配抛出异常
 
+## newapi 监控平台
+
+在原有 AI 模型健康监控之上，本项目内置一套 newapi 实例监控平台，用于监控自有及供应商的 newapi 网关：使用信息、模型用量、各渠道 TTFT / 连通性、缓存占用、渠道报错，并支持阈值告警 + 飞书机器人提醒。该子系统与原健康检查轮询器并行运行，复用同一 SQLite 库与单进程轮询架构。
+
+### 监控目标（targets）
+
+- **两类目标**：`self`（自有 newapi，持有 admin token，可拉取全量管理数据）与 `supplier`（供应商实例，仅做主动探测）。
+- **访问机制**：`lib/collectors/newapi-client.ts:newapiGet()` 注入 `Authorization: <admin_token>` 与 `New-Api-User: <admin_user_id>` 头，解析 newapi 的 `{success, data}` 信封，15 秒超时。
+- **敏感字段加密**：`admin_token` / `probe_api_key` 经 `lib/db/monitor-crypto.ts`（AES-256-GCM，密钥由 `ADMIN_SESSION_SECRET` 经 HKDF-SHA256 派生）加密入库，读出时解密；对外 API 与列表页只暴露 `maskSecret()` 脱敏值，绝不返回明文。
+
+### 采集器（collectors）
+
+`lib/collectors/index.ts` 维护采集器注册表（`collector_type → collect 函数`），`runCollector(target, task)` 分派；当 `collector_type !== "active_probe"` 且 `target.kind === "supplier"` 时抛 `SkipCollector`（供应商无管理权限，仅允许主动探测）。
+
+- **拉取型**（self 专用）：`newapi-usage`（`/api/data`，增量时间窗，产出 usage_quota/usage_tokens/request_count，带 model/user 维度）、`newapi-errors`（`/api/log?type=5`，按渠道聚合 error_count）、`newapi-balance`（`/api/channel/`，渠道余额）、`newapi-cache`（`/api/option/channel_affinity_cache`，缓存占用条目数 cache_entries）。
+- **主动探测型**（self + supplier）：`active-probe` 复用 `lib/providers/ai-sdk-check.ts` 测量 reachable / ttft_ms / ping_ms。
+
+### 调度与运行
+
+- **任务调度**：`monitor_tasks` 表以 `next_run_at` 时间戳驱动；`getDueTasks(now)` 取出到期且 `enabled=1 AND is_maintenance=0` 的任务，`recordTaskRun()` 在每次执行后推迟 `next_run_at = now + interval_seconds`（无论成功/跳过/失败都重排，避免紧密重试）。
+- **运行器**：`lib/core/monitor-runner.ts:runMonitorOnce()` 为一个采集周期——取到期任务 → `p-limit` 并发执行采集器 → `insertSamples()` → 重排 → `evaluateAlertRules()` → 按需 `cleanupSamples()`。已接入既有后台轮询器 `lib/core/poller.ts` 的 `tick()`（独立 try/catch，监控失败不影响原健康检查）。
+
+### 指标存储与告警
+
+- **宽表**：`metric_samples` 时序宽表，含 `metric` / `value` / `dim_model` / `dim_user` / `dim_channel` / `checked_at` / `meta`，`lib/db/samples.ts` 提供批量写入、窗口聚合（sum/avg/max/min/count/last，空窗 sum/avg/max/min→null、count→0）、最新 N 条、区间序列与保留期清理。
+- **告警引擎**：`lib/alerting/engine.ts:evaluateAlertRules()` 按规则在时间窗内聚合指标并与阈值比较，运行 firing/resolved 状态机，含去抖（连续 `consecutive_breaches` 次才触发）与去重（已 firing 不重复发送）；每条 `alert_rules` 对应一行 `alert_events` 状态。
+- **飞书通知**：`lib/alerting/feishu-card.ts` 构建交互式卡片（resolved 绿、severity 决定 info 蓝/warning 橙/critical 红），按飞书规范签名（`timestamp\nsecret` 作 HMAC-SHA256 密钥、空消息体）并发送（失败重试一次）。`lib/db/feishu.ts:resolveWebhook()` 路由优先级：显式 webhookId → 按 group_name 匹配 → group_name 为 NULL 的默认 webhook → 无。
+
+### 数据模型（新增 6 张表）
+
+`monitor_targets`、`monitor_tasks`、`metric_samples`、`alert_rules`、`alert_events`、`feishu_webhooks`，权威定义见 `lib/db/schema.sql`，由 `lib/db/migrate.ts` 幂等迁移（与原 6 张表同库）。
+
+### 管理与对外接口
+
+- **后台管理**：`/admin/targets`、`/admin/monitor-tasks`、`/admin/alerts`、`/admin/webhooks`、`/admin/alert-events` 页面，配套 `app/admin/(protected)/*/actions.ts` Server Actions；全部经 `requireAppUser()` + `isAdminUser` 管理员守卫。
+- **对外只读 API**：`/api/monitor/targets`（概览）、`/api/monitor/targets/[id]`（详情）、`/api/monitor/metrics`（区间序列），均 `force-dynamic`，仅返回脱敏字段，绝不含明文密钥。
+- **公开看板区块**：`components/monitor/targets-section.tsx` 客户端轮询 `/api/monitor/targets`，渲染可用性 / TTFT / 报错卡片网格。
+
 ## 关键约定
 
 ### 数据流向
