@@ -75,4 +75,53 @@ describe("feishu-card", () => {
     expect(sentBody).toHaveProperty("sign");
     expect(sentBody.sign).toBe(signFeishu("mysecret", Number(sentBody.timestamp)));
   });
+
+  // NEW: Feishu logical failure tests (HTTP 200 but nonzero code)
+
+  it("sendFeishu 两次均返回 200+{code:19021} 则抛错（重试两次）", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 19021, msg: "sign match fail" }), { status: 200 })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 19021, msg: "sign match fail" }), { status: 200 })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const webhook: FeishuWebhookRow = {
+      id: "w3", name: "W3", webhook_url: "https://open.feishu.cn/hook/z", secret: null,
+      group_name: null, created_at: "", updated_at: "",
+    };
+    await expect(sendFeishu(webhook, { msg_type: "interactive", card: {} })).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("sendFeishu 首次 200+{code:19021}、第二次 200+{code:0} 则重试后成功", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 19021, msg: "sign match fail" }), { status: 200 })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 0, msg: "success" }), { status: 200 })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const webhook: FeishuWebhookRow = {
+      id: "w4", name: "W4", webhook_url: "https://open.feishu.cn/hook/q", secret: null,
+      group_name: null, created_at: "", updated_at: "",
+    };
+    await expect(sendFeishu(webhook, { msg_type: "interactive", card: {} })).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("sendFeishu 200+{code:0,msg:'success'} 视为成功，fetch 仅调用一次", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ code: 0, msg: "success" }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const webhook: FeishuWebhookRow = {
+      id: "w5", name: "W5", webhook_url: "https://open.feishu.cn/hook/r", secret: null,
+      group_name: null, created_at: "", updated_at: "",
+    };
+    await expect(sendFeishu(webhook, { msg_type: "interactive", card: {} })).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
