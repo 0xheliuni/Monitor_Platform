@@ -16,7 +16,7 @@ describe("monitor schema", () => {
     const names = db
       .prepare("SELECT name FROM sqlite_master WHERE type='table'")
       .all()
-      .map((r: any) => r.name);
+      .map((r) => (r as { name: string }).name);
     for (const t of ["monitor_targets","monitor_tasks","metric_samples","feishu_webhooks","alert_rules","alert_events"]) {
       expect(names).toContain(t);
     }
@@ -30,7 +30,7 @@ describe("monitor schema", () => {
     db.prepare("INSERT INTO monitor_tasks (id,target_id,name,collector_type,interval_seconds,created_at,updated_at) VALUES (?,?,?,?,?,?,?)")
       .run("k1","t1","K","active_probe",60,now,now);
     db.prepare("DELETE FROM monitor_targets WHERE id=?").run("t1");
-    const count = db.prepare("SELECT COUNT(*) c FROM monitor_tasks").get() as any;
+    const count = db.prepare("SELECT COUNT(*) c FROM monitor_tasks").get() as { c: number };
     expect(count.c).toBe(0);
   });
 

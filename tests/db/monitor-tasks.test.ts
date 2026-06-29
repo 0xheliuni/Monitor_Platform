@@ -3,7 +3,7 @@ import Database from "better-sqlite3";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { __setDbForTest } from "@/lib/db/client";
-import { createTask, getTask, getDueTasks, recordTaskRun, updateTask } from "@/lib/db/monitor-tasks";
+import { createTask, getTask, getDueTasks, recordTaskRun } from "@/lib/db/monitor-tasks";
 
 beforeEach(() => {
   const db = new Database(":memory:");

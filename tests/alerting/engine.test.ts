@@ -27,7 +27,7 @@ function seed() {
   return db;
 }
 
-function addRule(db: any, over: Record<string, unknown> = {}) {
+function addRule(db: Database.Database, over: Record<string, unknown> = {}) {
   const now = new Date().toISOString();
   const r = {
     id: "r1", name: "错误激增", target_id: "t1", task_id: null, metric: "error_count",
@@ -39,7 +39,7 @@ function addRule(db: any, over: Record<string, unknown> = {}) {
   return r.id;
 }
 
-let db: any;
+let db: Database.Database;
 beforeEach(() => { db = seed(); sendMock.mockReset(); sendMock.mockResolvedValue(undefined); });
 afterEach(() => vi.restoreAllMocks());
 

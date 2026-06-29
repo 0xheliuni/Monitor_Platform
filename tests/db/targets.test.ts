@@ -29,7 +29,7 @@ describe("targets", () => {
 
   it("数据库中存储的是密文而非明文", async () => {
     const t = await createTarget(base);
-    const raw = getDb().prepare("SELECT admin_token, probe_api_key FROM monitor_targets WHERE id=?").get(t.id) as any;
+    const raw = getDb().prepare("SELECT admin_token, probe_api_key FROM monitor_targets WHERE id=?").get(t.id) as { admin_token: string; probe_api_key: string };
     expect(raw.admin_token).not.toBe("acc-token-xyz");
     expect(raw.admin_token).toContain(".");
   });
