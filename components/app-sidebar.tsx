@@ -3,15 +3,20 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
+  ActivityIcon,
   BellIcon,
   FolderTreeIcon,
   GaugeIcon,
   HistoryIcon,
   LayoutTemplateIcon,
   Layers3Icon,
+  ListChecksIcon,
   ServerCogIcon,
+  SirenIcon,
+  TargetIcon,
   TerminalIcon,
   WaypointsIcon,
+  WebhookIcon,
 } from "lucide-react"
 
 import { NavUser } from "@/components/nav-user"
@@ -37,6 +42,14 @@ const mainItems = [
   { title: "系统通知", url: "/admin/notifications", icon: BellIcon, adminOnly: true },
   { title: "历史记录", url: "/admin/history", icon: HistoryIcon },
   { title: "运行状态", url: "/admin/system", icon: WaypointsIcon },
+]
+
+const monitorItems = [
+  { title: "监控目标", url: "/admin/targets", icon: TargetIcon, adminOnly: true },
+  { title: "监控任务", url: "/admin/monitor-tasks", icon: ListChecksIcon, adminOnly: true },
+  { title: "告警规则", url: "/admin/alerts", icon: SirenIcon, adminOnly: true },
+  { title: "告警事件", url: "/admin/alert-events", icon: ActivityIcon, adminOnly: true },
+  { title: "飞书 Webhook", url: "/admin/webhooks", icon: WebhookIcon, adminOnly: true },
 ]
 
 export function AppSidebar({
@@ -100,6 +113,34 @@ export function AppSidebar({
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+        {monitorItems.some((item) => !item.adminOnly || user.role === "admin") ? (
+          <SidebarGroup>
+            <SidebarGroupLabel>newapi 监控</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {monitorItems
+                  .filter((item) => !item.adminOnly || user.role === "admin")
+                  .map((item) => {
+                  const isActive = pathname.startsWith(item.url)
+                  const Icon = item.icon
+
+                  return (
+                    <SidebarMenuItem key={item.url}>
+                      <SidebarMenuButton
+                        isActive={isActive}
+                        tooltip={item.title}
+                        render={<Link href={item.url} />}
+                      >
+                        <Icon />
+                        <span>{item.title}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  )
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ) : null}
       </SidebarContent>
       <SidebarFooter>
         <NavUser user={user} />

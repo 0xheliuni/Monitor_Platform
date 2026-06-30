@@ -97,6 +97,7 @@ export default async function MonitorTasksPage({
                     </td>
                     <td className="py-3">
                       <div className="flex items-center gap-2">
+                        <Button variant="outline" size="sm" render={<Link href={`/admin/monitor-tasks/${t.id}`} />}>编辑</Button>
                         <form action={deleteTaskAction}>
                           <input type="hidden" name="id" value={t.id} />
                           <Button type="submit" variant="destructive" size="sm">删除</Button>
